@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { TrafficLight } from '../components/TrafficLight';
-import { CameraFeed } from '../components/CameraFeed';
 import { Counter } from '../components/Counter';
-import { Users, AlertTriangle } from 'lucide-react';
+import { Users, AlertTriangle, Clock, MapPin } from 'lucide-react';
 import { useGymData } from '../hooks/useGymData';
 import { useCounterWebSocket } from '../hooks/useCounterWebSocket';
 
@@ -14,7 +13,6 @@ export function Dashboard() {
   const [isSystemActive, setIsSystemActive] = useState(true);
   const { addEntry, addExit } = useGymData();
 
-  // Called by the WebSocket hook whenever the backend count changes.
   const handleDelta = useCallback(
     (delta: number) => {
       if (delta > 0) {
@@ -28,7 +26,6 @@ export function Dashboard() {
 
   const { count: wsCount, connected: wsConnected } = useCounterWebSocket(handleDelta);
 
-  // When WebSocket delivers a real count, apply it directly.
   useEffect(() => {
     if (wsConnected) {
       setCurrentCount(wsCount);
@@ -40,7 +37,7 @@ export function Dashboard() {
     if (wsConnected || !isSystemActive) return;
 
     const interval = setInterval(() => {
-      const change = Math.floor(Math.random() * 3) - 1; // -1, 0, or +1
+      const change = Math.floor(Math.random() * 3) - 1;
       setCurrentCount((prev) => {
         const newCount = Math.max(0, Math.min(60, prev + change));
         if (change === 1) addEntry();
@@ -52,7 +49,6 @@ export function Dashboard() {
     return () => clearInterval(interval);
   }, [wsConnected, isSystemActive, addEntry, addExit]);
 
-  // Capacity alert
   useEffect(() => {
     setShowAlert(currentCount > MAX_CAPACITY);
   }, [currentCount]);
@@ -61,54 +57,60 @@ export function Dashboard() {
   const handleToggleSystem = () => setIsSystemActive((s) => !s);
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-7xl">
+    <div className="container mx-auto px-4 py-8 max-w-6xl">
       {/* Header */}
       <div className="text-center mb-8">
-        <div className="flex items-center justify-center gap-3 mb-2">
-          <Users className="w-10 h-10 text-white" />
-          <h1 className="text-4xl font-bold text-white">Contador de personas</h1>
+        <p className="text-[#7EC8E3] text-sm font-medium uppercase tracking-widest mb-1">
+          Tecnológico de Monterrey · Campus Estado de México
+        </p>
+        <div className="flex items-center justify-center gap-3 mb-3">
+          <Users className="w-9 h-9 text-white" />
+          <h1 className="text-4xl font-bold text-white">Aforo del Gimnasio</h1>
         </div>
-        <p className="text-blue-200">Capacidad máxima recomendada: {MAX_CAPACITY} personas</p>
-        <div className="flex flex-wrap items-center justify-center gap-3 mt-2">
+        <p className="text-white/50 text-sm">
+          Capacidad máxima recomendada: <span className="text-white font-semibold">{MAX_CAPACITY} personas</span>
+        </p>
+
+        {/* Status badges */}
+        <div className="flex flex-wrap items-center justify-center gap-3 mt-3">
           <div className="flex items-center gap-2">
             <div
-              className={`w-3 h-3 rounded-full ${isSystemActive ? 'bg-green-400 animate-pulse' : 'bg-gray-400'}`}
+              className={`w-2.5 h-2.5 rounded-full ${isSystemActive ? 'bg-green-400 animate-pulse' : 'bg-gray-400'}`}
             />
-            <span className="text-sm text-blue-200">
-              Sistema de visión computarizada: {isSystemActive ? 'ACTIVO' : 'PAUSADO'}
+            <span className="text-xs text-white/60">
+              Sistema: {isSystemActive ? 'ACTIVO' : 'PAUSADO'}
             </span>
           </div>
           <span
-            className={`text-xs px-2 py-0.5 rounded-full ${
+            className={`text-xs px-3 py-1 rounded-full border ${
               wsConnected
-                ? 'bg-green-500/30 text-green-300'
-                : 'bg-yellow-500/30 text-yellow-300'
+                ? 'bg-green-500/20 border-green-400/40 text-green-300'
+                : 'bg-amber-500/20 border-amber-400/40 text-amber-300'
             }`}
           >
-            {wsConnected ? '● Raspberry Pi conectada' : '○ Simulación (sin conexión)'}
+            {wsConnected ? '● Raspberry Pi conectada' : '○ Modo simulación'}
           </span>
         </div>
       </div>
 
       {/* Alert Banner */}
       {showAlert && (
-        <div className="mb-6 bg-red-500 border-2 border-red-300 rounded-xl p-4 animate-pulse">
+        <div className="mb-6 bg-red-600/90 backdrop-blur-sm border border-red-400/60 rounded-xl p-4 animate-pulse shadow-lg shadow-red-900/50">
           <div className="flex items-center gap-3 text-white">
-            <AlertTriangle className="w-8 h-8" />
+            <AlertTriangle className="w-7 h-7 flex-shrink-0" />
             <div>
-              <div className="font-bold text-xl">¡ALERTA DE CAPACIDAD EXCEDIDA!</div>
-              <div className="text-sm">
-                Se ha superado el límite de {MAX_CAPACITY} personas. Exceso:{' '}
-                {currentCount - MAX_CAPACITY} personas
+              <div className="font-bold text-lg">¡ALERTA: CAPACIDAD EXCEDIDA!</div>
+              <div className="text-sm text-red-100">
+                Límite de {MAX_CAPACITY} personas superado · Exceso: {currentCount - MAX_CAPACITY} persona{currentCount - MAX_CAPACITY !== 1 ? 's' : ''}
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Main Control Panel */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        <div className="bg-white/10 backdrop-blur-md rounded-xl shadow-lg p-8 border border-white/20">
+      {/* Main Panel */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <div className="bg-white/8 backdrop-blur-md rounded-2xl shadow-xl p-8 border border-white/15">
           <Counter
             count={currentCount}
             maxCapacity={MAX_CAPACITY}
@@ -116,7 +118,7 @@ export function Dashboard() {
             onToggleSystem={handleToggleSystem}
           />
         </div>
-        <div className="bg-white/10 backdrop-blur-md rounded-xl shadow-lg p-8 border border-white/20">
+        <div className="bg-white/8 backdrop-blur-md rounded-2xl shadow-xl p-8 border border-white/15">
           <TrafficLight
             percentage={getCapacityPercentage()}
             currentCount={currentCount}
@@ -125,12 +127,42 @@ export function Dashboard() {
         </div>
       </div>
 
-      {/* Camera Feeds Section */}
-      <div className="bg-white/10 backdrop-blur-md rounded-xl shadow-lg p-8 border border-white/20">
-        <h2 className="text-2xl font-bold text-white mb-6">Cámaras de Seguridad</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <CameraFeed title="Cámara - Entrada" cameraId="entrada" />
-          <CameraFeed title="Cámara - Salida" cameraId="salida" />
+      {/* Info Row */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Horarios */}
+        <div className="bg-white/8 backdrop-blur-md rounded-2xl p-6 border border-white/15">
+          <div className="flex items-center gap-2 mb-4">
+            <Clock className="w-5 h-5 text-[#7EC8E3]" />
+            <h3 className="text-white font-semibold">Horarios de Operación</h3>
+          </div>
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between items-center">
+              <span className="text-white/60">Lunes – Viernes</span>
+              <span className="text-white font-medium">6:00 – 22:00</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-white/60">Sábado</span>
+              <span className="text-white font-medium">7:00 – 18:00</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-white/60">Domingo</span>
+              <span className="text-white font-medium">8:00 – 14:00</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Ubicación / Info */}
+        <div className="bg-white/8 backdrop-blur-md rounded-2xl p-6 border border-white/15">
+          <div className="flex items-center gap-2 mb-4">
+            <MapPin className="w-5 h-5 text-[#7EC8E3]" />
+            <h3 className="text-white font-semibold">Información</h3>
+          </div>
+          <p className="text-white/60 text-sm leading-relaxed">
+            El conteo se actualiza en tiempo real mediante visión computarizada con IA instalada en la entrada del gimnasio.
+          </p>
+          <p className="text-white/40 text-xs mt-3">
+            ¿Dudas? Contacta a Servicios Deportivos · Ext. 4200
+          </p>
         </div>
       </div>
     </div>
