@@ -1,7 +1,14 @@
+import asyncio
+import csv
 import cv2
+import json
 import math
+import os
+import threading
 import time
+from datetime import datetime
 
+import websockets
 from picamera2 import MappedArray, Picamera2
 from picamera2.devices import IMX500
 from picamera2.devices.imx500 import NetworkIntrinsics
@@ -11,19 +18,117 @@ from picamera2.devices.imx500 import NetworkIntrinsics
 # -------------------------------------------------
 MODEL = "/usr/share/imx500-models/imx500_network_ssd_mobilenetv2_fpnlite_320x320_pp.rpk"
 THRESHOLD = 0.55
-LINE_X = 320              # línea vertical
+LINE_X = 320              # línea vertical de conteo
 MAX_DISTANCE = 80         # distancia máxima para asociar detecciones
 MAX_MISSES = 10           # frames que aguanta un track sin verse
 
 # COCO: person = 0
 PERSON_CLASS_ID = 0
 
+# WebSocket
+WS_PORT = 8765
+
+# CSV de promedios horarios
+CSV_FILE = "conteo_horario.csv"
+SAMPLE_INTERVAL = 60      # segundos entre muestras para el promedio horario
+
+# -------------------------------------------------
+# Estado global
+# -------------------------------------------------
 last_detections = []
 tracks = {}
 next_id = 0
 contador = 0
 
+# -------------------------------------------------
+# WebSocket
+# -------------------------------------------------
+ws_clients: set = set()
+ws_loop: asyncio.AbstractEventLoop | None = None
 
+
+async def _ws_handler(websocket):
+    """Registra el cliente y envía el conteo actual al conectar."""
+    ws_clients.add(websocket)
+    try:
+        await websocket.send(json.dumps({"count": contador}))
+        await websocket.wait_closed()
+    finally:
+        ws_clients.discard(websocket)
+
+
+async def _broadcast(count: int):
+    """Envía el conteo a todos los clientes conectados."""
+    if not ws_clients:
+        return
+    msg = json.dumps({"count": count})
+    await asyncio.gather(*[c.send(msg) for c in list(ws_clients)], return_exceptions=True)
+
+
+def broadcast_count():
+    """Llama a _broadcast desde el hilo principal sin bloquear."""
+    if ws_loop and ws_loop.is_running():
+        asyncio.run_coroutine_threadsafe(_broadcast(contador), ws_loop)
+
+
+def _start_ws_server():
+    global ws_loop
+    ws_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(ws_loop)
+
+    async def _serve():
+        async with websockets.serve(_ws_handler, "0.0.0.0", WS_PORT):
+            print(f"WebSocket escuchando en ws://0.0.0.0:{WS_PORT}")
+            await asyncio.Future()  # run forever
+
+    ws_loop.run_until_complete(_serve())
+
+
+# -------------------------------------------------
+# CSV – promedio horario
+# -------------------------------------------------
+_hourly_samples: list[int] = []
+_last_sample_time: float = time.time()
+_last_hour: datetime = datetime.now().replace(minute=0, second=0, microsecond=0)
+
+
+def _init_csv():
+    if not os.path.exists(CSV_FILE):
+        with open(CSV_FILE, "w", newline="") as f:
+            csv.writer(f).writerow(["hora", "promedio_personas"])
+
+
+def _record_sample():
+    """Toma una muestra por minuto y guarda el promedio al cambiar de hora."""
+    global _last_sample_time, _last_hour, _hourly_samples
+
+    now_ts = time.time()
+    now_dt = datetime.fromtimestamp(now_ts)
+    current_hour = now_dt.replace(minute=0, second=0, microsecond=0)
+
+    # Muestra cada SAMPLE_INTERVAL segundos
+    if now_ts - _last_sample_time >= SAMPLE_INTERVAL:
+        _hourly_samples.append(contador)
+        _last_sample_time = now_ts
+
+    # Al cambiar de hora: escribir promedio de la hora anterior
+    if current_hour != _last_hour:
+        if _hourly_samples:
+            avg = sum(_hourly_samples) / len(_hourly_samples)
+            with open(CSV_FILE, "a", newline="") as f:
+                csv.writer(f).writerow(
+                    [_last_hour.strftime("%Y-%m-%d %H:%M"), round(avg, 2)]
+                )
+            print(
+                f"[CSV] {_last_hour.strftime('%Y-%m-%d %H:%M')} → promedio: {avg:.2f} personas"
+            )
+        _hourly_samples.clear()
+        _last_hour = current_hour
+
+
+# -------------------------------------------------
+# Detección
+# -------------------------------------------------
 class Detection:
     def __init__(self, coords, category, conf, metadata):
         self.category = int(category)
@@ -69,12 +174,8 @@ def actualizar_tracks(detections):
     dets = []
     for det in detections:
         x, y, w, h = det.box
-        x = int(x)
-        y = int(y)
-        w = int(w)
-        h = int(h)
+        x, y, w, h = int(x), int(y), int(w), int(h)
 
-        # filtro por tamaño mínimo
         if w * h < 1500:
             continue
 
@@ -82,19 +183,15 @@ def actualizar_tracks(detections):
         cy = y + h // 2
 
         dets.append({
-            "x1": x,
-            "y1": y,
-            "x2": x + w,
-            "y2": y + h,
-            "cx": cx,
-            "cy": cy,
+            "x1": x, "y1": y,
+            "x2": x + w, "y2": y + h,
+            "cx": cx, "cy": cy,
             "conf": det.conf,
         })
 
     usados = set()
     ids_tracks = list(tracks.keys())
 
-    # Asociar detecciones a tracks por cercanía
     for det in dets:
         mejor_id = None
         mejor_dist = 1e9
@@ -102,7 +199,6 @@ def actualizar_tracks(detections):
         for tid in ids_tracks:
             if tid in usados:
                 continue
-
             d = distancia(det["cx"], det["cy"], tracks[tid]["cx"], tracks[tid]["cy"])
             if d < mejor_dist and d < MAX_DISTANCE:
                 mejor_dist = d
@@ -122,13 +218,10 @@ def actualizar_tracks(detections):
             usados.add(mejor_id)
         else:
             tracks[next_id] = {
-                "cx": det["cx"],
-                "cy": det["cy"],
+                "cx": det["cx"], "cy": det["cy"],
                 "prev_cx": det["cx"],
-                "x1": det["x1"],
-                "y1": det["y1"],
-                "x2": det["x2"],
-                "y2": det["y2"],
+                "x1": det["x1"], "y1": det["y1"],
+                "x2": det["x2"], "y2": det["y2"],
                 "conf": det["conf"],
                 "misses": 0,
                 "counted": False,
@@ -136,40 +229,35 @@ def actualizar_tracks(detections):
             usados.add(next_id)
             next_id += 1
 
-    # Incrementar misses
     for tid in list(tracks.keys()):
         if tid not in usados:
             tracks[tid]["misses"] += 1
             if tracks[tid]["misses"] > MAX_MISSES:
                 del tracks[tid]
 
-    # Revisar cruces
     for tid, tr in tracks.items():
         prev_cx = tr["prev_cx"]
         cx = tr["cx"]
 
-        # izquierda -> derecha = -1
+        # izquierda → derecha = salida (-1)
         if not tr["counted"] and prev_cx < LINE_X <= cx:
             contador -= 1
             tr["counted"] = True
 
-        # derecha -> izquierda = +1
+        # derecha → izquierda = entrada (+1)
         elif not tr["counted"] and prev_cx > LINE_X >= cx:
             contador += 1
             tr["counted"] = True
 
-        # volver a habilitar conteo si se aleja de la línea
         if abs(cx - LINE_X) > 100:
             tr["counted"] = False
 
 
 def draw_overlay(request, stream="main"):
     with MappedArray(request, stream) as m:
-        # línea
         h, w = m.array.shape[:2]
         cv2.line(m.array, (LINE_X, 0), (LINE_X, h), (0, 0, 255), 2)
 
-        # contador
         cv2.putText(
             m.array,
             f"Contador: {contador}",
@@ -180,7 +268,6 @@ def draw_overlay(request, stream="main"):
             2,
         )
 
-        # tracks
         for tid, tr in tracks.items():
             x1, y1, x2, y2 = tr["x1"], tr["y1"], tr["x2"], tr["y2"]
             cx, cy = tr["cx"], tr["cy"]
@@ -224,13 +311,30 @@ picam2.start(config, show_preview=True)
 if intrinsics.preserve_aspect_ratio:
     imx500.set_auto_aspect_ratio()
 
+# Inicializar CSV y servidor WebSocket
+_init_csv()
+threading.Thread(target=_start_ws_server, daemon=True).start()
+
 print("Presiona Ctrl+C para salir")
 
+# -------------------------------------------------
+# Bucle principal
+# -------------------------------------------------
 try:
+    prev_contador = contador
     while True:
         metadata = picam2.capture_metadata()
         detections = parse_detections(metadata)
         actualizar_tracks(detections)
+
+        # Emitir por WebSocket solo cuando el conteo cambia
+        if contador != prev_contador:
+            broadcast_count()
+            prev_contador = contador
+
+        # Registrar muestra horaria
+        _record_sample()
+
         time.sleep(0.01)
 except KeyboardInterrupt:
     pass
