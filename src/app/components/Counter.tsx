@@ -30,52 +30,47 @@ export function Counter({ count, maxCapacity, isSystemActive, onToggleSystem }: 
   return (
     <div className="flex flex-col items-center">
       <div className="flex items-center gap-2 mb-6">
-        <Activity className="w-6 h-6 text-white" />
-        <h2 className="text-2xl font-bold text-white">Lectura Automática</h2>
+        <Activity className="w-5 h-5 text-[#7EC8E3]" />
+        <h2 className="text-xl font-bold text-white">Conteo en Tiempo Real</h2>
       </div>
-      
+
       {/* Current Count Display */}
       <div className="mb-8">
-        <div className="flex items-center justify-center gap-3 mb-2">
-          <div className={`text-8xl font-bold ${exceeded ? 'text-red-300' : 'text-white'}`}>
+        <div className="flex items-center justify-center gap-4 mb-3">
+          <div className={`text-8xl font-black tabular-nums ${exceeded ? 'text-red-300' : 'text-white'}`}>
             {count}
           </div>
           {trend === 'up' && (
-            <TrendingUp className="w-8 h-8 text-green-300 animate-bounce" />
+            <TrendingUp className="w-8 h-8 text-green-400 animate-bounce" />
           )}
           {trend === 'down' && (
-            <TrendingDown className="w-8 h-8 text-red-300 animate-bounce" />
+            <TrendingDown className="w-8 h-8 text-red-400 animate-bounce" />
           )}
         </div>
-        <div className="text-center text-blue-100">
-          <div className="text-xl">
-            {exceeded ? (
-              <>
-                <span className="text-red-300 font-bold">SOBRE CAPACIDAD</span>
-                <div className="text-sm mt-1">Capacidad recomendada: {maxCapacity} personas</div>
-              </>
+        <div className="text-center">
+          {exceeded ? (
+            <>
+              <span className="text-red-300 font-bold text-lg">SOBRE CAPACIDAD</span>
+              <div className="text-sm text-white/50 mt-1">Máximo recomendado: {maxCapacity} personas</div>
+            </>
+          ) : (
+            <span className="text-white/60 text-lg">de {maxCapacity} personas</span>
+          )}
+          <div className="mt-2 text-base">
+            {!exceeded ? (
+              <>Lugares disponibles: <span className="font-bold text-green-400">{availableSpots}</span></>
             ) : (
-              <>de {maxCapacity} personas</>
+              <>Exceso: <span className="font-bold text-red-300">+{count - maxCapacity}</span> personas</>
             )}
           </div>
-          {!exceeded && (
-            <div className="text-lg mt-2">
-              Lugares disponibles: <span className="font-semibold text-green-300">{availableSpots}</span>
-            </div>
-          )}
-          {exceeded && (
-            <div className="text-lg mt-2">
-              Exceso: <span className="font-semibold text-red-300">+{count - maxCapacity}</span> personas
-            </div>
-          )}
         </div>
       </div>
 
       {/* Progress Bar */}
       <div className="w-full mb-8">
-        <div className="h-4 bg-white/20 rounded-full overflow-hidden">
+        <div className="h-3 bg-white/15 rounded-full overflow-hidden">
           <div
-            className={`h-full transition-all duration-300 ${
+            className={`h-full rounded-full transition-all duration-500 ${
               percentage < 65 ? 'bg-green-400' :
               percentage < 90 ? 'bg-yellow-400' :
               percentage <= 100 ? 'bg-red-400' :
@@ -84,49 +79,42 @@ export function Counter({ count, maxCapacity, isSystemActive, onToggleSystem }: 
             style={{ width: `${Math.min(100, percentage)}%` }}
           />
         </div>
-        <div className="text-center mt-2 text-sm text-blue-200">
+        <div className="text-center mt-2 text-xs text-white/50">
           {percentage.toFixed(1)}% de capacidad
         </div>
       </div>
 
       {/* System Status */}
-      <div className="bg-white/10 rounded-lg p-4 w-full mb-4 border border-white/20">
-        <div className="text-sm text-blue-200 mb-2">Estado del Sistema</div>
+      <div className="bg-white/8 rounded-xl p-4 w-full mb-4 border border-white/15">
+        <div className="text-xs text-white/40 mb-2 uppercase tracking-wide">Estado del Sistema</div>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className={`w-3 h-3 rounded-full ${isSystemActive ? 'bg-green-400 animate-pulse' : 'bg-gray-400'}`} />
-            <span className="font-semibold text-white">
+            <div className={`w-2.5 h-2.5 rounded-full ${isSystemActive ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}`} />
+            <span className="text-sm font-medium text-white">
               {isSystemActive ? 'Detectando movimiento...' : 'Sistema pausado'}
             </span>
           </div>
           <button
             onClick={onToggleSystem}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
               isSystemActive
-                ? 'bg-yellow-500 hover:bg-yellow-600 text-white'
+                ? 'bg-amber-500 hover:bg-amber-600 text-white'
                 : 'bg-green-500 hover:bg-green-600 text-white'
             }`}
           >
             {isSystemActive ? (
-              <>
-                <Pause className="w-4 h-4" />
-                Pausar
-              </>
+              <><Pause className="w-3.5 h-3.5" /> Pausar</>
             ) : (
-              <>
-                <Play className="w-4 h-4" />
-                Activar
-              </>
+              <><Play className="w-3.5 h-3.5" /> Activar</>
             )}
           </button>
         </div>
       </div>
 
-      {/* Info Box */}
-      <div className="bg-white/10 border border-white/30 rounded-lg p-4 w-full">
-        <p className="text-sm text-blue-100">
-          <strong className="text-white">Sistema de Visión Computarizada:</strong> El conteo se actualiza automáticamente 
-          mediante análisis de video en tiempo real de las cámaras de entrada y salida.
+      {/* Info */}
+      <div className="bg-white/5 border border-white/10 rounded-xl p-4 w-full">
+        <p className="text-xs text-white/40 leading-relaxed">
+          <span className="text-white/60 font-medium">IMX500 · MobileNetV2</span> — Detección de personas mediante IA embebida en la cámara. El conteo se actualiza automáticamente al cruzar la línea de acceso.
         </p>
       </div>
     </div>
