@@ -1,1 +1,4 @@
 # autocount
+# Iniciar
+git clone
+
