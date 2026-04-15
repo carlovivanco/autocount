@@ -14,7 +14,7 @@ from ultralytics import YOLO
 # -------------------------------------------------
 # Configuración
 # -------------------------------------------------
-MODEL_PATH = "yolov8n.pt"       # se descarga automáticamente la primera vez
+MODEL_PATH = "yolo26n.pt"        # se descarga automáticamente la primera vez
 CONFIDENCE = 0.4                 # confianza mínima de detección
 LINE_X = 320                     # posición horizontal de la línea de conteo (px)
 LINE_RESET_DIST = 100            # distancia (px) para habilitar un nuevo cruce
