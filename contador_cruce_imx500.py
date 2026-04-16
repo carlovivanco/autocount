@@ -241,12 +241,12 @@ def actualizar_tracks(detections):
 
         # izquierda → derecha = salida (-1)
         if not tr["counted"] and prev_cx < LINE_X <= cx:
-            contador -= 1
+            contador += 1
             tr["counted"] = True
 
         # derecha → izquierda = entrada (+1)
         elif not tr["counted"] and prev_cx > LINE_X >= cx:
-            contador += 1
+            contador -= 1
             tr["counted"] = True
 
         if abs(cx - LINE_X) > 100:
@@ -256,7 +256,7 @@ def actualizar_tracks(detections):
 def draw_overlay(request, stream="main"):
     with MappedArray(request, stream) as m:
         h, w = m.array.shape[:2]
-        cv2.line(m.array, (LINE_X, 0), (LINE_X, h), (0, 0, 255), 2)
+        cv2.line(m.array, (LINE_X, 0), (LINE_X, h), (0, 0, 255), 12)
 
         cv2.putText(
             m.array,
