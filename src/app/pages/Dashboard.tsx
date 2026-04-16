@@ -32,22 +32,6 @@ export function Dashboard() {
     }
   }, [wsCount, wsConnected]);
 
-  // Simulation fallback – only active when the Pi is not reachable.
-  useEffect(() => {
-    if (wsConnected || !isSystemActive) return;
-
-    const interval = setInterval(() => {
-      const change = Math.floor(Math.random() * 3) - 1;
-      setCurrentCount((prev) => {
-        const newCount = Math.max(0, Math.min(60, prev + change));
-        if (change === 1) addEntry();
-        else if (change === -1 && prev > 0) addExit();
-        return newCount;
-      });
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [wsConnected, isSystemActive, addEntry, addExit]);
 
   useEffect(() => {
     setShowAlert(currentCount > MAX_CAPACITY);
