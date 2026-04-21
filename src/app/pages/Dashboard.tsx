@@ -10,51 +10,27 @@ const MAX_CAPACITY = 40;
 export function Dashboard() {
   const [currentCount, setCurrentCount] = useState(0);
   const [showAlert, setShowAlert] = useState(false);
-  const [isSystemActive, setIsSystemActive] = useState(true);
   const { addEntry, addExit } = useGymData();
 
   const handleDelta = useCallback(
     (delta: number) => {
-      if (delta > 0) {
-        for (let i = 0; i < delta; i++) addEntry();
-      } else {
-        for (let i = 0; i < Math.abs(delta); i++) addExit();
-      }
+      if (delta > 0) for (let i = 0; i < delta; i++) addEntry();
+      else for (let i = 0; i < Math.abs(delta); i++) addExit();
     },
     [addEntry, addExit],
   );
 
-  const { count: wsCount, connected: wsConnected } = useCounterWebSocket(handleDelta);
+  const { count: wsCount, connected: wsConnected, peakPrediction } = useCounterWebSocket(handleDelta);
 
   useEffect(() => {
-    if (wsConnected) {
-      setCurrentCount(wsCount);
-    }
+    if (wsConnected) setCurrentCount(wsCount);
   }, [wsCount, wsConnected]);
-
-  // Simulation fallback – only active when the Pi is not reachable.
-  useEffect(() => {
-    if (wsConnected || !isSystemActive) return;
-
-    const interval = setInterval(() => {
-      const change = Math.floor(Math.random() * 3) - 1;
-      setCurrentCount((prev) => {
-        const newCount = Math.max(0, Math.min(60, prev + change));
-        if (change === 1) addEntry();
-        else if (change === -1 && prev > 0) addExit();
-        return newCount;
-      });
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [wsConnected, isSystemActive, addEntry, addExit]);
 
   useEffect(() => {
     setShowAlert(currentCount > MAX_CAPACITY);
   }, [currentCount]);
 
   const getCapacityPercentage = () => (currentCount / MAX_CAPACITY) * 100;
-  const handleToggleSystem = () => setIsSystemActive((s) => !s);
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-6xl">
@@ -68,19 +44,10 @@ export function Dashboard() {
           <h1 className="text-4xl font-bold text-white">Aforo del Gimnasio</h1>
         </div>
         <p className="text-white/50 text-sm">
-          Capacidad máxima recomendada: <span className="text-white font-semibold">{MAX_CAPACITY} personas</span>
+          Capacidad máxima recomendada:{' '}
+          <span className="text-white font-semibold">{MAX_CAPACITY} personas</span>
         </p>
-
-        {/* Status badges */}
         <div className="flex flex-wrap items-center justify-center gap-3 mt-3">
-          <div className="flex items-center gap-2">
-            <div
-              className={`w-2.5 h-2.5 rounded-full ${isSystemActive ? 'bg-green-400 animate-pulse' : 'bg-gray-400'}`}
-            />
-            <span className="text-xs text-white/60">
-              Sistema: {isSystemActive ? 'ACTIVO' : 'PAUSADO'}
-            </span>
-          </div>
           <span
             className={`text-xs px-3 py-1 rounded-full border ${
               wsConnected
@@ -88,12 +55,23 @@ export function Dashboard() {
                 : 'bg-amber-500/20 border-amber-400/40 text-amber-300'
             }`}
           >
-            {wsConnected ? '● Raspberry Pi conectada' : '○ Modo simulación'}
+            {wsConnected ? '● Raspberry Pi conectada' : '○ Sin conexión'}
           </span>
+          {peakPrediction && (
+            <span
+              className={`text-xs px-3 py-1 rounded-full border font-medium ${
+                peakPrediction === 'Peak'
+                  ? 'bg-red-500/20 border-red-400/40 text-red-300'
+                  : 'bg-sky-500/20 border-sky-400/40 text-sky-300'
+              }`}
+            >
+              {peakPrediction === 'Peak' ? '▲ Hora Peak' : '▽ Hora Off-peak'}
+            </span>
+          )}
         </div>
       </div>
 
-      {/* Alert Banner */}
+      {/* Alert */}
       {showAlert && (
         <div className="mb-6 bg-red-600/90 backdrop-blur-sm border border-red-400/60 rounded-xl p-4 animate-pulse shadow-lg shadow-red-900/50">
           <div className="flex items-center gap-3 text-white">
@@ -101,7 +79,9 @@ export function Dashboard() {
             <div>
               <div className="font-bold text-lg">¡ALERTA: CAPACIDAD EXCEDIDA!</div>
               <div className="text-sm text-red-100">
-                Límite de {MAX_CAPACITY} personas superado · Exceso: {currentCount - MAX_CAPACITY} persona{currentCount - MAX_CAPACITY !== 1 ? 's' : ''}
+                Límite de {MAX_CAPACITY} personas superado · Exceso:{' '}
+                {currentCount - MAX_CAPACITY} persona
+                {currentCount - MAX_CAPACITY !== 1 ? 's' : ''}
               </div>
             </div>
           </div>
@@ -111,12 +91,7 @@ export function Dashboard() {
       {/* Main Panel */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         <div className="bg-white/8 backdrop-blur-md rounded-2xl shadow-xl p-8 border border-white/15">
-          <Counter
-            count={currentCount}
-            maxCapacity={MAX_CAPACITY}
-            isSystemActive={isSystemActive}
-            onToggleSystem={handleToggleSystem}
-          />
+          <Counter count={currentCount} maxCapacity={MAX_CAPACITY} />
         </div>
         <div className="bg-white/8 backdrop-blur-md rounded-2xl shadow-xl p-8 border border-white/15">
           <TrafficLight
@@ -129,29 +104,26 @@ export function Dashboard() {
 
       {/* Info Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Horarios */}
         <div className="bg-white/8 backdrop-blur-md rounded-2xl p-6 border border-white/15">
           <div className="flex items-center gap-2 mb-4">
             <Clock className="w-5 h-5 text-[#7EC8E3]" />
             <h3 className="text-white font-semibold">Horarios de Operación</h3>
           </div>
           <div className="space-y-2 text-sm">
-            <div className="flex justify-between items-center">
+            <div className="flex justify-between">
               <span className="text-white/60">Lunes – Viernes</span>
               <span className="text-white font-medium">6:00 – 22:00</span>
             </div>
-            <div className="flex justify-between items-center">
+            <div className="flex justify-between">
               <span className="text-white/60">Sábado</span>
               <span className="text-white font-medium">7:00 – 18:00</span>
             </div>
-            <div className="flex justify-between items-center">
+            <div className="flex justify-between">
               <span className="text-white/60">Domingo</span>
               <span className="text-white font-medium">8:00 – 14:00</span>
             </div>
           </div>
         </div>
-
-        {/* Ubicación / Info */}
         <div className="bg-white/8 backdrop-blur-md rounded-2xl p-6 border border-white/15">
           <div className="flex items-center gap-2 mb-4">
             <MapPin className="w-5 h-5 text-[#7EC8E3]" />
