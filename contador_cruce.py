@@ -1,9 +1,9 @@
 import asyncio
 import base64
+import csv
 import cv2
 import io
 import json
-import math
 import os
 import threading
 import time
@@ -12,36 +12,33 @@ from datetime import datetime, timedelta
 import joblib
 import pandas as pd
 import websockets
-from picamera2 import MappedArray, Picamera2
-from picamera2.devices import IMX500
-from picamera2.devices.imx500 import NetworkIntrinsics
+from picamera2 import Picamera2
 from sklearn.ensemble import RandomForestClassifier
+from ultralytics import YOLO
 
 # -------------------------------------------------
 # Configuración
 # -------------------------------------------------
-MODEL = "/usr/share/imx500-models/imx500_network_ssd_mobilenetv2_fpnlite_320x320_pp.rpk"
-THRESHOLD        = 0.55
+MODEL_PATH       = "yolo26n.pt"
+CONFIDENCE       = 0.4
 LINE_X           = 320
-MAX_DISTANCE     = 80
-MAX_MISSES       = 10
-PERSON_CLASS_ID  = 0
+LINE_RESET_DIST  = 100
+FRAME_W, FRAME_H = 640, 480
 
-WS_PORT         = 8765
-PARQUET_FILE    = "conteo_horario.parquet"
-ML_MODEL_FILE   = "peak_model.joblib"
-SAMPLE_INTERVAL = 60
-RETRAIN_DAYS    = 14
+WS_PORT          = 8765
+PARQUET_FILE     = "conteo_horario.parquet"
+ML_MODEL_FILE    = "peak_model.joblib"
+SAMPLE_INTERVAL  = 60        # segundos entre muestras
+RETRAIN_DAYS     = 14        # reentrenar cada N días
 
 DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
 # -------------------------------------------------
 # Estado global
 # -------------------------------------------------
-last_detections = []
-tracks = {}
-next_id = 0
 contador = 0
+prev_cx: dict[int, int] = {}
+crossed: dict[int, bool] = {}
 
 # -------------------------------------------------
 # WebSocket
@@ -246,11 +243,11 @@ def _record_sample():
         if _hourly_samples:
             avg = sum(_hourly_samples) / len(_hourly_samples)
             row = {
-                "timestamp":         _last_hour.strftime("%Y-%m-%d %H:%M"),
-                "hora":              _last_hour.hour,
-                "dia_semana":        _last_hour.weekday(),
-                "dia_nombre":        DIAS[_last_hour.weekday()],
-                "promedio_personas": round(avg, 2),
+                "timestamp":          _last_hour.strftime("%Y-%m-%d %H:%M"),
+                "hora":               _last_hour.hour,
+                "dia_semana":         _last_hour.weekday(),
+                "dia_nombre":         DIAS[_last_hour.weekday()],
+                "promedio_personas":  round(avg, 2),
             }
             _append_parquet(row)
             print(
@@ -265,141 +262,91 @@ def _record_sample():
 
 
 # -------------------------------------------------
-# Detección IMX500
+# Inicio – cámara, modelo, servicios
 # -------------------------------------------------
-class Detection:
-    def __init__(self, coords, category, conf, metadata):
-        self.category = int(category)
-        self.conf = float(conf)
-        self.box = imx500.convert_inference_coords(coords, metadata, picam2)
+model = YOLO(MODEL_PATH)
 
-
-def parse_detections(metadata):
-    global last_detections
-    np_outputs = imx500.get_outputs(metadata, add_batch=True)
-    if np_outputs is None:
-        return last_detections
-    boxes, scores, classes = np_outputs[0][0], np_outputs[1][0], np_outputs[2][0]
-    if intrinsics.bbox_normalization:
-        _, input_h = imx500.get_input_size()
-        boxes = boxes / input_h
-    if intrinsics.bbox_order == "xy":
-        boxes = boxes[:, [1, 0, 3, 2]]
-    detections = []
-    for box, score, category in zip(boxes, scores, classes):
-        if float(score) < THRESHOLD or int(category) != PERSON_CLASS_ID:
-            continue
-        detections.append(Detection(box, category, score, metadata))
-    last_detections = detections
-    return detections
-
-
-def distancia(x1, y1, x2, y2):
-    return math.hypot(x2 - x1, y2 - y1)
-
-
-def actualizar_tracks(detections):
-    global tracks, next_id, contador
-    dets = []
-    for det in detections:
-        x, y, w, h = [int(v) for v in det.box]
-        if w * h < 1500:
-            continue
-        dets.append({"x1": x, "y1": y, "x2": x+w, "y2": y+h,
-                     "cx": x+w//2, "cy": y+h//2, "conf": det.conf})
-
-    usados = set()
-    ids_tracks = list(tracks.keys())
-    for det in dets:
-        mejor_id, mejor_dist = None, 1e9
-        for tid in ids_tracks:
-            if tid in usados:
-                continue
-            d = distancia(det["cx"], det["cy"], tracks[tid]["cx"], tracks[tid]["cy"])
-            if d < mejor_dist and d < MAX_DISTANCE:
-                mejor_dist, mejor_id = d, tid
-        if mejor_id is not None:
-            tr = tracks[mejor_id]
-            tr["prev_cx"] = tr["cx"]
-            tr.update({k: det[k] for k in det})
-            tr["cx"] = det["cx"]
-            tr["misses"] = 0
-            usados.add(mejor_id)
-        else:
-            tracks[next_id] = {**det, "prev_cx": det["cx"], "misses": 0, "counted": False}
-            usados.add(next_id)
-            next_id += 1
-
-    for tid in list(tracks.keys()):
-        if tid not in usados:
-            tracks[tid]["misses"] += 1
-            if tracks[tid]["misses"] > MAX_MISSES:
-                del tracks[tid]
-
-    for tid, tr in tracks.items():
-        px, cx = tr["prev_cx"], tr["cx"]
-        if not tr["counted"] and px < LINE_X <= cx:
-            contador += 1
-            tr["counted"] = True
-        elif not tr["counted"] and px > LINE_X >= cx and contador > 0:
-            contador -= 1
-            tr["counted"] = True
-        if abs(cx - LINE_X) > 100:
-            tr["counted"] = False
-
-
-def draw_overlay(request, stream="main"):
-    with MappedArray(request, stream) as m:
-        h, w = m.array.shape[:2]
-        cv2.line(m.array, (LINE_X, 0), (LINE_X, h), (0, 0, 255), 12)
-        cv2.putText(m.array, f"Contador: {contador}", (20, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 2)
-        for tid, tr in tracks.items():
-            cv2.rectangle(m.array, (tr["x1"], tr["y1"]), (tr["x2"], tr["y2"]), (0, 255, 0), 2)
-            cv2.circle(m.array, (tr["cx"], tr["cy"]), 5, (0, 255, 0), -1)
-            cv2.putText(m.array, f"ID {tid}", (tr["x1"], max(20, tr["y1"]-8)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-
-
-# -------------------------------------------------
-# Inicio IMX500
-# -------------------------------------------------
-imx500 = IMX500(MODEL)
-intrinsics = imx500.network_intrinsics or NetworkIntrinsics()
-intrinsics.task = "object detection"
-intrinsics.update_with_defaults()
-
-picam2 = Picamera2(imx500.camera_num)
+picam2 = Picamera2()
 config = picam2.create_preview_configuration(
-    controls={"FrameRate": intrinsics.inference_rate}, buffer_count=12
+    main={"size": (FRAME_W, FRAME_H), "format": "RGB888"}
 )
-imx500.show_network_fw_progress_bar()
-picam2.pre_callback = draw_overlay
-picam2.start(config, show_preview=True)
-if intrinsics.preserve_aspect_ratio:
-    imx500.set_auto_aspect_ratio()
+picam2.configure(config)
+picam2.start()
+time.sleep(2)
 
 threading.Thread(target=_start_ws_server, daemon=True).start()
-print("Presiona Ctrl+C para salir")
+print("Presiona q para salir")
 
 # -------------------------------------------------
 # Bucle principal
 # -------------------------------------------------
+prev_contador = contador
+
 try:
-    prev_contador = contador
     while True:
-        metadata = picam2.capture_metadata()
-        detections = parse_detections(metadata)
-        actualizar_tracks(detections)
+        frame = picam2.capture_array()
+
+        results = model.track(
+            frame,
+            classes=[0],
+            persist=True,
+            conf=CONFIDENCE,
+            verbose=False,
+        )
+
+        if results[0].boxes.id is not None:
+            boxes = results[0].boxes.xyxy.cpu().numpy()
+            ids   = results[0].boxes.id.cpu().numpy().astype(int)
+
+            for box, tid in zip(boxes, ids):
+                x1, y1, x2, y2 = map(int, box)
+                cx = (x1 + x2) // 2
+                cy = (y1 + y2) // 2
+
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.circle(frame, (cx, cy), 5, (0, 255, 0), -1)
+                cv2.putText(frame, f"ID {tid}", (x1, max(20, y1 - 8)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+                if tid in prev_cx:
+                    px = prev_cx[tid]
+                    already = crossed.get(tid, False)
+                    if not already and px < LINE_X <= cx:
+                        contador -= 1
+                        crossed[tid] = True
+                    elif not already and px > LINE_X >= cx:
+                        contador += 1
+                        crossed[tid] = True
+                    if abs(cx - LINE_X) > LINE_RESET_DIST:
+                        crossed[tid] = False
+                prev_cx[tid] = cx
+
+        active_ids = (
+            set(results[0].boxes.id.cpu().numpy().astype(int))
+            if results[0].boxes.id is not None else set()
+        )
+        for tid in list(prev_cx):
+            if tid not in active_ids:
+                del prev_cx[tid]
+                crossed.pop(tid, None)
+
+        cv2.line(frame, (LINE_X, 0), (LINE_X, FRAME_H), (0, 0, 255), 2)
+        cv2.putText(frame, f"Contador: {contador}", (20, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 2)
+        cv2.imshow("Conteo - Gym Tec EdoMex", frame)
 
         if contador != prev_contador:
             broadcast_count()
             prev_contador = contador
 
         _record_sample()
-        time.sleep(0.01)
+
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            break
 
 except KeyboardInterrupt:
     pass
+
 finally:
+    cv2.destroyAllWindows()
     picam2.stop()

@@ -1,38 +1,48 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 const WS_URL = (import.meta.env.VITE_WS_URL as string | undefined) ?? 'ws://raspberrypi.local:8765';
 
 interface CounterWebSocketResult {
   count: number;
   connected: boolean;
+  peakPrediction: string | null;
+  sendCommand: (cmd: string) => void;
 }
 
-/**
- * Connects to the Raspberry Pi WebSocket server and streams the live
- * person count. Automatically reconnects on disconnect.
- *
- * @param onDelta - called whenever the count changes; delta > 0 means entries,
- *                  delta < 0 means exits. May be called with |delta| > 1 if
- *                  multiple people cross at once.
- */
+function triggerExcelDownload(b64: string, filename: string) {
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const blob = new Blob([bytes], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export function useCounterWebSocket(
   onDelta: (delta: number) => void,
 ): CounterWebSocketResult {
   const [count, setCount] = useState(0);
   const [connected, setConnected] = useState(false);
+  const [peakPrediction, setPeakPrediction] = useState<string | null>(null);
   const prevCountRef = useRef(0);
   const onDeltaRef = useRef(onDelta);
+  const wsRef = useRef<WebSocket | null>(null);
   onDeltaRef.current = onDelta;
 
   useEffect(() => {
-    let ws: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout>;
     let unmounted = false;
 
     function connect() {
       if (unmounted) return;
-
-      ws = new WebSocket(WS_URL);
+      const ws = new WebSocket(WS_URL);
+      wsRef.current = ws;
 
       ws.onopen = () => {
         if (!unmounted) setConnected(true);
@@ -41,13 +51,18 @@ export function useCounterWebSocket(
       ws.onmessage = (event) => {
         if (unmounted) return;
         try {
-          const data = JSON.parse(event.data as string) as { count: number };
-          const newCount = typeof data.count === 'number' ? data.count : 0;
-          const delta = newCount - prevCountRef.current;
-          prevCountRef.current = newCount;
-          setCount(newCount);
-          if (delta !== 0) {
-            onDeltaRef.current(delta);
+          const data = JSON.parse(event.data as string) as Record<string, unknown>;
+          if ('count' in data) {
+            const newCount = typeof data.count === 'number' ? data.count : 0;
+            const delta = newCount - prevCountRef.current;
+            prevCountRef.current = newCount;
+            setCount(newCount);
+            if (delta !== 0) onDeltaRef.current(delta);
+            if ('peak_prediction' in data) {
+              setPeakPrediction(typeof data.peak_prediction === 'string' ? data.peak_prediction : null);
+            }
+          } else if ('excel_b64' in data) {
+            triggerExcelDownload(data.excel_b64 as string, data.filename as string);
           }
         } catch {
           // ignore malformed messages
@@ -57,13 +72,12 @@ export function useCounterWebSocket(
       ws.onclose = () => {
         if (!unmounted) {
           setConnected(false);
+          wsRef.current = null;
           reconnectTimer = setTimeout(connect, 3000);
         }
       };
 
-      ws.onerror = () => {
-        ws?.close();
-      };
+      ws.onerror = () => ws.close();
     }
 
     connect();
@@ -71,9 +85,16 @@ export function useCounterWebSocket(
     return () => {
       unmounted = true;
       clearTimeout(reconnectTimer);
-      ws?.close();
+      wsRef.current?.close();
     };
   }, []);
 
-  return { count, connected };
+  const sendCommand = useCallback((cmd: string) => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ command: cmd }));
+    }
+  }, []);
+
+  return { count, connected, peakPrediction, sendCommand };
 }
