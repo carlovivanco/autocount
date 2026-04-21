@@ -7,7 +7,7 @@ import math
 import os
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import joblib
 import pandas as pd
@@ -31,7 +31,7 @@ WS_PORT         = 8765
 PARQUET_FILE    = "conteo_horario.parquet"
 ML_MODEL_FILE   = "peak_model.joblib"
 SAMPLE_INTERVAL = 60
-RETRAIN_DAYS    = 30
+RETRAIN_DAYS    = 14
 
 DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
@@ -53,14 +53,71 @@ ws_loop: asyncio.AbstractEventLoop | None = None
 def _excel_bytes() -> bytes:
     if not os.path.exists(PARQUET_FILE):
         return b""
+
     df = pd.read_parquet(PARQUET_FILE)
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+
+    # Añadir predicción ML si el modelo existe
     if os.path.exists(ML_MODEL_FILE) and len(df) >= 24:
-        model = joblib.load(ML_MODEL_FILE)
-        df["prediccion"] = model.predict(df[["hora", "dia_semana"]])
-        df["prediccion"] = df["prediccion"].map({1: "Peak", 0: "Off-peak"})
+        clf = joblib.load(ML_MODEL_FILE)
+        df["clasificacion"] = clf.predict(df[["hora", "dia_semana"]])
+        df["clasificacion"] = df["clasificacion"].map({1: "Peak", 0: "Off-peak"})
+    else:
+        df["clasificacion"] = "—"
+
+    # Límite inicio de semana actual (lunes 00:00)
+    today = datetime.now()
+    week_start = (today - timedelta(days=today.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+
+    # ── Hoja 1: Semana actual — detalle por hora ──────────────────────────
+    cur = df[df["timestamp"] >= week_start].copy()
+    cur["hora_str"] = cur["hora"].apply(lambda h: f"{h:02d}:00")
+    sheet1 = cur[["timestamp", "dia_nombre", "hora_str", "promedio_personas", "clasificacion"]].rename(columns={
+        "timestamp":         "Fecha/Hora",
+        "dia_nombre":        "Día",
+        "hora_str":          "Hora",
+        "promedio_personas": "Personas (prom. hora)",
+        "clasificacion":     "Clasificación",
+    })
+
+    past = df[df["timestamp"] < week_start].copy()
+
+    # ── Hoja 2: Semanas anteriores — promedio por día de semana ──────────
+    if not past.empty:
+        iso = past["timestamp"].dt.isocalendar()
+        past["semana"] = iso.year.astype(str) + "-S" + iso.week.astype(str).str.zfill(2)
+        sheet2 = (
+            past.groupby(["semana", "dia_semana", "dia_nombre"])["promedio_personas"]
+            .mean().round(2).reset_index()
+            .sort_values(["semana", "dia_semana"])
+            [["semana", "dia_nombre", "promedio_personas"]]
+            .rename(columns={"semana": "Semana", "dia_nombre": "Día",
+                              "promedio_personas": "Promedio personas"})
+        )
+    else:
+        sheet2 = pd.DataFrame(columns=["Semana", "Día", "Promedio personas"])
+
+    # ── Hoja 3: Meses anteriores — promedio por día de semana ────────────
+    if not past.empty:
+        past["mes"] = past["timestamp"].dt.strftime("%Y-%m")
+        sheet3 = (
+            past.groupby(["mes", "dia_semana", "dia_nombre"])["promedio_personas"]
+            .mean().round(2).reset_index()
+            .sort_values(["mes", "dia_semana"])
+            [["mes", "dia_nombre", "promedio_personas"]]
+            .rename(columns={"mes": "Mes", "dia_nombre": "Día",
+                              "promedio_personas": "Promedio personas"})
+        )
+    else:
+        sheet3 = pd.DataFrame(columns=["Mes", "Día", "Promedio personas"])
+
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Conteo Horario")
+        sheet1.to_excel(writer, index=False, sheet_name="Semana Actual")
+        sheet2.to_excel(writer, index=False, sheet_name="Semanas Anteriores")
+        sheet3.to_excel(writer, index=False, sheet_name="Meses Anteriores")
     return buf.getvalue()
 
 
