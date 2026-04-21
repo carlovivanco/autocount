@@ -1,2 +1,16 @@
 *.deb
 *.7z
+dataset/
+.claude/
+
+# Training runs — track only the best model for deployment to the Pi
+runs/**
+!runs/**/
+!runs/**/best.pt
+
+# Generated/local files
+node_modules/
+dist/
+.env.local
+*.parquet
+*.joblib

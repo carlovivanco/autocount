@@ -250,8 +250,8 @@ def actualizar_tracks(detections):
                 mejor_dist, mejor_id = d, tid
         if mejor_id is not None:
             tr = tracks[mejor_id]
-            tr.update({k: det[k] for k in det})
             tr["prev_cx"] = tr["cx"]
+            tr.update({k: det[k] for k in det})
             tr["cx"] = det["cx"]
             tr["misses"] = 0
             usados.add(mejor_id)
@@ -271,7 +271,7 @@ def actualizar_tracks(detections):
         if not tr["counted"] and px < LINE_X <= cx:
             contador += 1
             tr["counted"] = True
-        elif not tr["counted"] and px > LINE_X >= cx:
+        elif not tr["counted"] and px > LINE_X >= cx and contador > 0:
             contador -= 1
             tr["counted"] = True
         if abs(cx - LINE_X) > 100:
