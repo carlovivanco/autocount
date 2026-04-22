@@ -11,13 +11,9 @@ export function Counter({ count, maxCapacity }: CounterProps) {
   const [trend, setTrend] = useState<'up' | 'down' | 'stable'>('stable');
 
   useEffect(() => {
-    if (count > previousCount) {
-      setTrend('up');
-    } else if (count < previousCount) {
-      setTrend('down');
-    } else {
-      setTrend('stable');
-    }
+    if (count > previousCount) setTrend('up');
+    else if (count < previousCount) setTrend('down');
+    else setTrend('stable');
     setPreviousCount(count);
   }, [count, previousCount]);
 
@@ -32,24 +28,20 @@ export function Counter({ count, maxCapacity }: CounterProps) {
         <h2 className="text-xl font-bold text-white">Conteo en Tiempo Real</h2>
       </div>
 
-      {/* Current Count Display */}
+      {/* Count */}
       <div className="mb-8">
         <div className="flex items-center justify-center gap-4 mb-3">
           <div className={`text-8xl font-black tabular-nums ${exceeded ? 'text-red-300' : 'text-white'}`}>
             {count}
           </div>
-          {trend === 'up' && (
-            <TrendingUp className="w-8 h-8 text-green-400 animate-bounce" />
-          )}
-          {trend === 'down' && (
-            <TrendingDown className="w-8 h-8 text-red-400 animate-bounce" />
-          )}
+          {trend === 'up' && <TrendingUp className="w-8 h-8 text-green-400 animate-bounce" />}
+          {trend === 'down' && <TrendingDown className="w-8 h-8 text-red-400 animate-bounce" />}
         </div>
         <div className="text-center">
           {exceeded ? (
             <>
               <span className="text-red-300 font-bold text-lg">SOBRE CAPACIDAD</span>
-              <div className="text-sm text-white/50 mt-1">Máximo recomendado: {maxCapacity} personas</div>
+              <div className="text-sm text-white/50 mt-1">Máximo: {maxCapacity} personas</div>
             </>
           ) : (
             <span className="text-white/60 text-lg">de {maxCapacity} personas</span>
@@ -65,14 +57,13 @@ export function Counter({ count, maxCapacity }: CounterProps) {
       </div>
 
       {/* Progress Bar */}
-      <div className="w-full mb-8">
+      <div className="w-full mb-6">
         <div className="h-3 bg-white/15 rounded-full overflow-hidden">
           <div
             className={`h-full rounded-full transition-all duration-500 ${
               percentage < 65 ? 'bg-green-400' :
               percentage < 90 ? 'bg-yellow-400' :
-              percentage <= 100 ? 'bg-red-400' :
-              'bg-red-600'
+              percentage <= 100 ? 'bg-red-400' : 'bg-red-600'
             }`}
             style={{ width: `${Math.min(100, percentage)}%` }}
           />
@@ -85,7 +76,7 @@ export function Counter({ count, maxCapacity }: CounterProps) {
       {/* Info */}
       <div className="bg-white/5 border border-white/10 rounded-xl p-4 w-full">
         <p className="text-xs text-white/40 leading-relaxed">
-          <span className="text-white/60 font-medium">IMX500 · MobileNetV2</span> — Detección de personas mediante IA embebida en la cámara. El conteo se actualiza automáticamente al cruzar la línea de acceso.
+          <span className="text-white/60 font-medium">YOLO26n · IMX500</span> — Detección de personas en tiempo real mediante IA. El conteo se actualiza al cruzar la línea de acceso.
         </p>
       </div>
     </div>
