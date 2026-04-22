@@ -1,5 +1,5 @@
 import { Outlet, Link, useLocation } from 'react-router';
-import { Activity, ShieldCheck } from 'lucide-react';
+import { Activity, ClipboardList, ShieldCheck } from 'lucide-react';
 
 export function Root() {
   const location = useLocation();
@@ -36,6 +36,17 @@ export function Root() {
               >
                 <Activity className="w-4 h-4" />
                 Control en Vivo
+              </Link>
+              <Link
+                to="/admin"
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                  location.pathname === '/admin'
+                    ? 'bg-white text-[#003865] shadow-md'
+                    : 'text-white/80 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <ShieldCheck className="w-4 h-4" />
+                Admin
               </Link>
               <Link
                 to="/admin"

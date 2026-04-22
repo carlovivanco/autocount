@@ -1,0 +1,29 @@
+# gym-tec.service — Servicio systemd para el contador del Gym Tec EdoMex
+#
+# Instalación (en el Pi):
+#   sudo cp gym-tec.service /etc/systemd/system/
+#   sudo chmod +x /home/pi/autocount/scripts/arrancar.sh
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable gym-tec
+#   sudo systemctl start gym-tec
+#
+# Comandos útiles:
+#   sudo systemctl status gym-tec     → ver estado
+#   sudo journalctl -u gym-tec -f     → ver logs en vivo
+#   sudo systemctl restart gym-tec    → reiniciar manualmente
+
+[Unit]
+Description=Gym Tec EdoMex - Contador de personas
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/pi/autocount/scripts/arrancar.sh
+Restart=always
+RestartSec=15
+User=pi
+WorkingDirectory=/home/pi/autocount
+
+[Install]
+WantedBy=multi-user.target

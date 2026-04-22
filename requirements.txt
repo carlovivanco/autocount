@@ -1,0 +1,6 @@
+ultralytics
+opencv-python
+websockets
+numpy
+# picamera2 solo se instala en Raspberry Pi (viene preinstalado en Pi OS)
+# picamera2
