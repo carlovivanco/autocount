@@ -89,13 +89,6 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     setTimeout(() => setDownloading(false), 3000);
   };
 
-  const currentDate = new Date().toLocaleDateString('es-MX', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
-
   return (
     <div className="container mx-auto px-4 py-8 max-w-4xl">
       {/* Header */}
@@ -178,13 +171,6 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           <Download className="w-4 h-4" />
           {downloading ? 'Generando archivo...' : 'Descargar Excel'}
         </button>
-      </div>
-
-      {/* ── Registro Diario ───────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3 mb-6">
-        <Calendar className="w-5 h-5 text-[#7EC8E3]" />
-        <h2 className="text-lg font-bold text-white">Registro Diario</h2>
-        <span className="text-white/30 text-xs capitalize">{currentDate}</span>
       </div>
 
       {/* Summary cards */}
