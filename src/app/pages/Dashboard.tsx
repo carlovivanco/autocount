@@ -20,7 +20,7 @@ export function Dashboard() {
     [addEntry, addExit],
   );
 
-  const { count: wsCount, connected: wsConnected } = useCounterWebSocket(handleDelta);
+  const { count: wsCount, connected: wsConnected, peakPrediction } = useCounterWebSocket(handleDelta);
 
   useEffect(() => {
     if (wsConnected) setCurrentCount(wsCount);
@@ -57,6 +57,17 @@ export function Dashboard() {
           >
             {wsConnected ? '● Raspberry Pi conectada' : '○ Sin conexión'}
           </span>
+          {peakPrediction && (
+            <span
+              className={`text-xs px-3 py-1 rounded-full border font-medium ${
+                peakPrediction === 'Peak'
+                  ? 'bg-red-500/20 border-red-400/40 text-red-300'
+                  : 'bg-sky-500/20 border-sky-400/40 text-sky-300'
+              }`}
+            >
+              {peakPrediction === 'Peak' ? '▲ Hora Peak' : '▽ Hora Off-peak'}
+            </span>
+          )}
         </div>
       </div>
 

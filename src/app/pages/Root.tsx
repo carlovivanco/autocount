@@ -38,15 +38,15 @@ export function Root() {
                 Control en Vivo
               </Link>
               <Link
-                to="/registro"
+                to="/admin"
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  location.pathname === '/registro'
+                  location.pathname === '/admin'
                     ? 'bg-white text-[#003865] shadow-md'
                     : 'text-white/80 hover:text-white hover:bg-white/10'
                 }`}
               >
-                <ClipboardList className="w-4 h-4" />
-                Registro Diario
+                <ShieldCheck className="w-4 h-4" />
+                Admin
               </Link>
               <Link
                 to="/admin"

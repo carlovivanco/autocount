@@ -249,6 +249,7 @@ def _record_sample():
                 _train_model()
         _hourly_samples.clear()
         _last_hour = current_hour
+        broadcast_count()
 
 
 # -------------------------------------------------

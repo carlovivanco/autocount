@@ -28,7 +28,9 @@ export function useCounterWebSocket(
 ): CounterWebSocketResult {
   const [count, setCount] = useState(0);
   const [connected, setConnected] = useState(false);
+  const [peakPrediction, setPeakPrediction] = useState<string | null>(null);
   const prevCountRef = useRef(0);
+  const isFirstMessage = useRef(true);
   const onDeltaRef = useRef(onDelta);
   const wsRef = useRef<WebSocket | null>(null);
   onDeltaRef.current = onDelta;
