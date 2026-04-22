@@ -4,7 +4,6 @@ import {
   Wifi, WifiOff, ArrowDownCircle, ArrowUpCircle, Calendar, TrendingUp,
 } from 'lucide-react';
 import { useCounterWebSocket } from '../hooks/useCounterWebSocket';
-import { useGymData } from '../hooks/useGymData';
 
 const ADMIN_USER = (import.meta.env.VITE_ADMIN_USER as string | undefined) ?? 'admin';
 const ADMIN_PASS = (import.meta.env.VITE_ADMIN_PASSWORD as string | undefined) ?? 'admin';
@@ -77,10 +76,33 @@ function LoginForm({ onLogin }: { onLogin: () => void }) {
   );
 }
 
+type LogEntry = { type: 'entrada' | 'salida'; timestamp: Date };
+
 function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const [downloading, setDownloading] = useState(false);
-  const { count, connected, sendCommand } = useCounterWebSocket(useCallback(() => {}, []));
-  const { totalEntries, totalExits, entries } = useGymData();
+  const [entries, setEntries] = useState<LogEntry[]>([]);
+  const [totalEntries, setTotalEntries] = useState(0);
+  const [totalExits, setTotalExits] = useState(0);
+
+  const handleDelta = useCallback((delta: number) => {
+    const now = new Date();
+    if (delta > 0) {
+      setTotalEntries(n => n + delta);
+      setEntries(prev => [
+        ...prev,
+        ...Array.from({ length: delta }, () => ({ type: 'entrada' as const, timestamp: now })),
+      ]);
+    } else {
+      const abs = Math.abs(delta);
+      setTotalExits(n => n + abs);
+      setEntries(prev => [
+        ...prev,
+        ...Array.from({ length: abs }, () => ({ type: 'salida' as const, timestamp: now })),
+      ]);
+    }
+  }, []);
+
+  const { count, connected, sendCommand } = useCounterWebSocket(handleDelta);
   const netFlow = totalEntries - totalExits;
 
   const handleDownload = () => {

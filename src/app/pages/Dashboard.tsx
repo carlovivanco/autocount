@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { TrafficLight } from '../components/TrafficLight';
 import { Counter } from '../components/Counter';
 import { Users, AlertTriangle, Clock, MapPin } from 'lucide-react';
-import { useGymData } from '../hooks/useGymData';
 import { useCounterWebSocket } from '../hooks/useCounterWebSocket';
 
 const MAX_CAPACITY = 40;
@@ -10,17 +9,8 @@ const MAX_CAPACITY = 40;
 export function Dashboard() {
   const [currentCount, setCurrentCount] = useState(0);
   const [showAlert, setShowAlert] = useState(false);
-  const { addEntry, addExit } = useGymData();
 
-  const handleDelta = useCallback(
-    (delta: number) => {
-      if (delta > 0) for (let i = 0; i < delta; i++) addEntry();
-      else for (let i = 0; i < Math.abs(delta); i++) addExit();
-    },
-    [addEntry, addExit],
-  );
-
-  const { count: wsCount, connected: wsConnected, peakPrediction } = useCounterWebSocket(handleDelta);
+  const { count: wsCount, connected: wsConnected, peakPrediction } = useCounterWebSocket(useCallback(() => {}, []));
 
   useEffect(() => {
     if (wsConnected) setCurrentCount(wsCount);

@@ -5,6 +5,7 @@ const WS_URL = (import.meta.env.VITE_WS_URL as string | undefined) ?? 'ws://rasp
 interface CounterWebSocketResult {
   count: number;
   connected: boolean;
+  peakPrediction: string | null;
   sendCommand: (cmd: string) => void;
 }
 
@@ -41,6 +42,7 @@ export function useCounterWebSocket(
 
     function connect() {
       if (unmounted) return;
+      isFirstMessage.current = true;
       const ws = new WebSocket(WS_URL);
       wsRef.current = ws;
 
@@ -54,10 +56,16 @@ export function useCounterWebSocket(
           const data = JSON.parse(event.data as string) as Record<string, unknown>;
           if ('count' in data) {
             const newCount = typeof data.count === 'number' ? data.count : 0;
-            const delta = newCount - prevCountRef.current;
+            if (!isFirstMessage.current) {
+              const delta = newCount - prevCountRef.current;
+              if (delta !== 0) onDeltaRef.current(delta);
+            }
+            isFirstMessage.current = false;
             prevCountRef.current = newCount;
             setCount(newCount);
-            if (delta !== 0) onDeltaRef.current(delta);
+            if ('peak_prediction' in data) {
+              setPeakPrediction(typeof data.peak_prediction === 'string' ? data.peak_prediction : null);
+            }
           } else if ('excel_b64' in data) {
             triggerExcelDownload(data.excel_b64 as string, data.filename as string);
           }
@@ -93,5 +101,5 @@ export function useCounterWebSocket(
     }
   }, []);
 
-  return { count, connected, sendCommand };
+  return { count, connected, peakPrediction, sendCommand };
 }
