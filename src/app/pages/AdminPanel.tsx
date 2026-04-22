@@ -78,28 +78,62 @@ function LoginForm({ onLogin }: { onLogin: () => void }) {
 
 type LogEntry = { type: 'entrada' | 'salida'; timestamp: Date };
 
+const todayKey = () => `gym_log_${new Date().toISOString().slice(0, 10)}`;
+
+function loadLog(): { entries: LogEntry[]; totalEntries: number; totalExits: number } {
+  try {
+    const raw = localStorage.getItem(todayKey());
+    if (!raw) return { entries: [], totalEntries: 0, totalExits: 0 };
+    const data = JSON.parse(raw) as {
+      entries: Array<{ type: string; timestamp: string }>;
+      totalEntries: number;
+      totalExits: number;
+    };
+    return {
+      entries: data.entries.map(e => ({
+        type: e.type as 'entrada' | 'salida',
+        timestamp: new Date(e.timestamp),
+      })),
+      totalEntries: data.totalEntries,
+      totalExits: data.totalExits,
+    };
+  } catch {
+    return { entries: [], totalEntries: 0, totalExits: 0 };
+  }
+}
+
+function saveLog(entries: LogEntry[], totalEntries: number, totalExits: number) {
+  try {
+    localStorage.setItem(todayKey(), JSON.stringify({
+      entries: entries.map(e => ({ type: e.type, timestamp: e.timestamp.toISOString() })),
+      totalEntries,
+      totalExits,
+    }));
+  } catch { /* ignore quota errors */ }
+}
+
+// Module-level log state — survives AdminDashboard remounts within the session
+let _log = loadLog();
+
 function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const [downloading, setDownloading] = useState(false);
-  const [entries, setEntries] = useState<LogEntry[]>([]);
-  const [totalEntries, setTotalEntries] = useState(0);
-  const [totalExits, setTotalExits] = useState(0);
+  const [entries, setEntries] = useState<LogEntry[]>(_log.entries);
+  const [totalEntries, setTotalEntries] = useState(_log.totalEntries);
+  const [totalExits, setTotalExits] = useState(_log.totalExits);
 
   const handleDelta = useCallback((delta: number) => {
     const now = new Date();
-    if (delta > 0) {
-      setTotalEntries(n => n + delta);
-      setEntries(prev => [
-        ...prev,
-        ...Array.from({ length: delta }, () => ({ type: 'entrada' as const, timestamp: now })),
-      ]);
-    } else {
-      const abs = Math.abs(delta);
-      setTotalExits(n => n + abs);
-      setEntries(prev => [
-        ...prev,
-        ...Array.from({ length: abs }, () => ({ type: 'salida' as const, timestamp: now })),
-      ]);
-    }
+    const added = Array.from(
+      { length: Math.abs(delta) },
+      () => ({ type: (delta > 0 ? 'entrada' : 'salida') as 'entrada' | 'salida', timestamp: now }),
+    );
+    _log.entries = [..._log.entries, ...added];
+    if (delta > 0) _log.totalEntries += delta;
+    else _log.totalExits += Math.abs(delta);
+    saveLog(_log.entries, _log.totalEntries, _log.totalExits);
+    setEntries([..._log.entries]);
+    setTotalEntries(_log.totalEntries);
+    setTotalExits(_log.totalExits);
   }, []);
 
   const { count, connected, sendCommand } = useCounterWebSocket(handleDelta);
