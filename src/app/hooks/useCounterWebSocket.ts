@@ -31,6 +31,7 @@ export function useCounterWebSocket(
   const [connected, setConnected] = useState(false);
   const [peakPrediction, setPeakPrediction] = useState<string | null>(null);
   const prevCountRef = useRef(0);
+  const isFirstMessage = useRef(true);
   const onDeltaRef = useRef(onDelta);
   const wsRef = useRef<WebSocket | null>(null);
   onDeltaRef.current = onDelta;
@@ -41,6 +42,7 @@ export function useCounterWebSocket(
 
     function connect() {
       if (unmounted) return;
+      isFirstMessage.current = true;
       const ws = new WebSocket(WS_URL);
       wsRef.current = ws;
 
@@ -54,10 +56,13 @@ export function useCounterWebSocket(
           const data = JSON.parse(event.data as string) as Record<string, unknown>;
           if ('count' in data) {
             const newCount = typeof data.count === 'number' ? data.count : 0;
-            const delta = newCount - prevCountRef.current;
+            if (!isFirstMessage.current) {
+              const delta = newCount - prevCountRef.current;
+              if (delta !== 0) onDeltaRef.current(delta);
+            }
+            isFirstMessage.current = false;
             prevCountRef.current = newCount;
             setCount(newCount);
-            if (delta !== 0) onDeltaRef.current(delta);
             if ('peak_prediction' in data) {
               setPeakPrediction(typeof data.peak_prediction === 'string' ? data.peak_prediction : null);
             }
