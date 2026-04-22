@@ -1,14 +1,12 @@
-import { Activity, Pause, Play, TrendingUp, TrendingDown } from 'lucide-react';
+import { Activity, TrendingUp, TrendingDown } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
 interface CounterProps {
   count: number;
   maxCapacity: number;
-  isSystemActive: boolean;
-  onToggleSystem: () => void;
 }
 
-export function Counter({ count, maxCapacity, isSystemActive, onToggleSystem }: CounterProps) {
+export function Counter({ count, maxCapacity }: CounterProps) {
   const [previousCount, setPreviousCount] = useState(count);
   const [trend, setTrend] = useState<'up' | 'down' | 'stable'>('stable');
 
@@ -81,33 +79,6 @@ export function Counter({ count, maxCapacity, isSystemActive, onToggleSystem }: 
         </div>
         <div className="text-center mt-2 text-xs text-white/50">
           {percentage.toFixed(1)}% de capacidad
-        </div>
-      </div>
-
-      {/* System Status */}
-      <div className="bg-white/8 rounded-xl p-4 w-full mb-4 border border-white/15">
-        <div className="text-xs text-white/40 mb-2 uppercase tracking-wide">Estado del Sistema</div>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className={`w-2.5 h-2.5 rounded-full ${isSystemActive ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}`} />
-            <span className="text-sm font-medium text-white">
-              {isSystemActive ? 'Detectando movimiento...' : 'Sistema pausado'}
-            </span>
-          </div>
-          <button
-            onClick={onToggleSystem}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-              isSystemActive
-                ? 'bg-amber-500 hover:bg-amber-600 text-white'
-                : 'bg-green-500 hover:bg-green-600 text-white'
-            }`}
-          >
-            {isSystemActive ? (
-              <><Pause className="w-3.5 h-3.5" /> Pausar</>
-            ) : (
-              <><Play className="w-3.5 h-3.5" /> Activar</>
-            )}
-          </button>
         </div>
       </div>
 
