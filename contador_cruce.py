@@ -118,10 +118,22 @@ def _excel_bytes() -> bytes:
     return buf.getvalue()
 
 
+def _current_peak_prediction() -> str | None:
+    if not os.path.exists(ML_MODEL_FILE):
+        return None
+    try:
+        clf = joblib.load(ML_MODEL_FILE)
+        now = datetime.now()
+        result = clf.predict([[now.hour, now.weekday()]])[0]
+        return "Peak" if result == 1 else "Off-peak"
+    except Exception:
+        return None
+
+
 async def _broadcast(count: int):
     if not ws_clients:
         return
-    msg = json.dumps({"count": count})
+    msg = json.dumps({"count": count, "peak_prediction": _current_peak_prediction()})
     await asyncio.gather(
         *[c.send(msg) for c in list(ws_clients)],
         return_exceptions=True,
@@ -132,7 +144,7 @@ async def _ws_handler(websocket):
     global contador
     ws_clients.add(websocket)
     try:
-        await websocket.send(json.dumps({"count": contador}))
+        await websocket.send(json.dumps({"count": contador, "peak_prediction": _current_peak_prediction()}))
         async for raw in websocket:
             try:
                 data = json.loads(raw)
@@ -246,6 +258,7 @@ def _record_sample():
                 _train_model()
         _hourly_samples.clear()
         _last_hour = current_hour
+        broadcast_count()
 
 
 # -------------------------------------------------
