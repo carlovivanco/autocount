@@ -1,4 +1,5 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import type { TodayEvent } from '../hooks/useCounterWebSocket';
 import {
   Lock, LogOut, Plus, Minus, Download, ShieldCheck,
   Wifi, WifiOff, ArrowDownCircle, ArrowUpCircle, Calendar, TrendingUp,
@@ -136,8 +137,25 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     setTotalExits(_log.totalExits);
   }, []);
 
-  const { count, connected, sendCommand } = useCounterWebSocket(handleDelta);
-  const netFlow = totalEntries - totalExits;
+  const { count, connected, sendCommand, todayEvents } = useCounterWebSocket(handleDelta);
+
+  // Initialize log from backend's authoritative day events on connect / midnight reset
+  useEffect(() => {
+    if (todayEvents === null) return;
+    const loaded: LogEntry[] = todayEvents.map((e: TodayEvent) => ({
+      type: e.tipo as 'entrada' | 'salida',
+      timestamp: new Date(e.timestamp),
+    }));
+    const te = loaded.filter(e => e.type === 'entrada').length;
+    const tx = loaded.filter(e => e.type === 'salida').length;
+    _log.entries = loaded;
+    _log.totalEntries = te;
+    _log.totalExits = tx;
+    saveLog(loaded, te, tx);
+    setEntries([...loaded]);
+    setTotalEntries(te);
+    setTotalExits(tx);
+  }, [todayEvents]);
 
   const handleDownload = () => {
     setDownloading(true);
@@ -261,7 +279,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-blue-200 text-xs font-medium uppercase tracking-wide">Personas Adentro</p>
-              <h3 className="text-5xl font-black text-white mt-2 tabular-nums">{netFlow}</h3>
+              <h3 className="text-5xl font-black text-white mt-2 tabular-nums">{count}</h3>
             </div>
             <div className="bg-white/15 p-3 rounded-xl">
               <TrendingUp className="w-7 h-7 text-white" />
@@ -335,7 +353,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             <div className="flex justify-between items-center">
               <span className="text-white/50 text-sm">Tasa de ocupación</span>
               <span className="text-white font-semibold text-sm">
-                {totalEntries > 0 ? Math.round((netFlow / 40) * 100) : 0}%
+                {Math.round((count / 40) * 100)}%
               </span>
             </div>
             <div className="w-full h-px bg-white/10" />

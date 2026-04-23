@@ -42,6 +42,7 @@ last_detections = []
 tracks = {}
 next_id = 0
 contador = 0
+_last_date: str = datetime.now().strftime("%Y-%m-%d")
 
 # -------------------------------------------------
 # WebSocket
@@ -121,6 +122,31 @@ def _excel_bytes() -> bytes:
     return buf.getvalue()
 
 
+def _today_events_file() -> str:
+    return f"eventos_{datetime.now().strftime('%Y-%m-%d')}.json"
+
+
+def _load_today_events() -> list:
+    path = _today_events_file()
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def _log_event(tipo: str):
+    events = _load_today_events()
+    events.append({"tipo": tipo, "timestamp": datetime.now().isoformat()})
+    try:
+        with open(_today_events_file(), "w") as f:
+            json.dump(events, f)
+    except Exception:
+        pass
+
+
 def _current_peak_prediction() -> str | None:
     if not os.path.exists(ML_MODEL_FILE):
         return None
@@ -147,16 +173,22 @@ async def _ws_handler(websocket):
     global contador
     ws_clients.add(websocket)
     try:
-        await websocket.send(json.dumps({"count": contador, "peak_prediction": _current_peak_prediction()}))
+        await websocket.send(json.dumps({
+            "count": contador,
+            "peak_prediction": _current_peak_prediction(),
+            "today_events": _load_today_events(),
+        }))
         async for raw in websocket:
             try:
                 data = json.loads(raw)
                 cmd = data.get("command", "")
                 if cmd == "increment":
                     contador += 1
+                    _log_event("entrada")
                     await _broadcast(contador)
                 elif cmd == "decrement":
                     contador -= 1
+                    _log_event("salida")
                     await _broadcast(contador)
                 elif cmd == "download_excel":
                     xlsx = _excel_bytes()
@@ -177,6 +209,13 @@ async def _ws_handler(websocket):
 def broadcast_count():
     if ws_loop and ws_loop.is_running():
         asyncio.run_coroutine_threadsafe(_broadcast(contador), ws_loop)
+
+
+async def _broadcast_midnight_reset():
+    if not ws_clients:
+        return
+    msg = json.dumps({"count": 0, "peak_prediction": None, "midnight_reset": True})
+    await asyncio.gather(*[c.send(msg) for c in list(ws_clients)], return_exceptions=True)
 
 
 def _start_ws_server():
@@ -232,11 +271,23 @@ def _train_model():
 
 
 def _record_sample():
-    global _last_sample_time, _last_hour, _hourly_samples
+    global _last_sample_time, _last_hour, _hourly_samples, contador, _last_date
 
     now_ts = time.time()
     now_dt = datetime.fromtimestamp(now_ts)
     current_hour = now_dt.replace(minute=0, second=0, microsecond=0)
+    current_date = now_dt.strftime("%Y-%m-%d")
+
+    if current_date != _last_date:
+        contador = 0
+        tracks.clear()
+        _hourly_samples.clear()
+        _last_date = current_date
+        print(f"[Reset] Medianoche — contador reiniciado")
+        if ws_loop and ws_loop.is_running():
+            asyncio.run_coroutine_threadsafe(
+                _broadcast_midnight_reset(), ws_loop
+            )
 
     if now_ts - _last_sample_time >= SAMPLE_INTERVAL:
         _hourly_samples.append(contador)
@@ -341,9 +392,11 @@ def actualizar_tracks(detections):
         if not tr["counted"] and px < LINE_X <= cx:
             contador += 1
             tr["counted"] = True
+            _log_event("entrada")
         elif not tr["counted"] and px > LINE_X >= cx and contador > 0:
             contador -= 1
             tr["counted"] = True
+            _log_event("salida")
         if abs(cx - LINE_X) > 100:
             tr["counted"] = False
 

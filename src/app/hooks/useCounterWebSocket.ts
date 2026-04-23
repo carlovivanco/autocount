@@ -2,10 +2,13 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 
 const WS_URL = (import.meta.env.VITE_WS_URL as string | undefined) ?? 'ws://raspberrypi.local:8765';
 
+export type TodayEvent = { tipo: string; timestamp: string };
+
 interface CounterWebSocketResult {
   count: number;
   connected: boolean;
   peakPrediction: string | null;
+  todayEvents: TodayEvent[] | null;
   sendCommand: (cmd: string) => void;
 }
 
@@ -30,6 +33,7 @@ export function useCounterWebSocket(
   const [count, setCount] = useState(0);
   const [connected, setConnected] = useState(false);
   const [peakPrediction, setPeakPrediction] = useState<string | null>(null);
+  const [todayEvents, setTodayEvents] = useState<TodayEvent[] | null>(null);
   const prevCountRef = useRef(0);
   const isFirstMessage = useRef(true);
   const onDeltaRef = useRef(onDelta);
@@ -56,13 +60,29 @@ export function useCounterWebSocket(
           const data = JSON.parse(event.data as string) as Record<string, unknown>;
           if ('count' in data) {
             const newCount = typeof data.count === 'number' ? data.count : 0;
-            if (!isFirstMessage.current) {
+
+            if ('midnight_reset' in data && data.midnight_reset) {
+              // Midnight reset — clear log, update count, no delta
+              prevCountRef.current = 0;
+              setCount(0);
+              setTodayEvents([]);
+              return;
+            }
+
+            if (isFirstMessage.current) {
+              // Initial sync — no delta, load today's events from backend
+              if ('today_events' in data && Array.isArray(data.today_events)) {
+                setTodayEvents(data.today_events as TodayEvent[]);
+              }
+            } else {
               const delta = newCount - prevCountRef.current;
               if (delta !== 0) onDeltaRef.current(delta);
             }
+
             isFirstMessage.current = false;
             prevCountRef.current = newCount;
             setCount(newCount);
+
             if ('peak_prediction' in data) {
               setPeakPrediction(typeof data.peak_prediction === 'string' ? data.peak_prediction : null);
             }
@@ -101,5 +121,5 @@ export function useCounterWebSocket(
     }
   }, []);
 
-  return { count, connected, peakPrediction, sendCommand };
+  return { count, connected, peakPrediction, todayEvents, sendCommand };
 }
