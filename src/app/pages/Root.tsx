@@ -5,9 +5,12 @@ export function Root() {
   const location = useLocation();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#001F3F] via-[#003865] to-[#001228]">
-      {/* Top accent stripe */}
-      <div className="h-1 bg-gradient-to-r from-[#0D6EBD] via-white to-[#0D6EBD]" />
+    <div className="min-h-dvh bg-gradient-to-br from-[#001F3F] via-[#003865] to-[#001228]">
+      {/* Top accent stripe — pushes down by the iOS status-bar safe area */}
+      <div
+        className="bg-gradient-to-r from-[#0D6EBD] via-white to-[#0D6EBD]"
+        style={{ height: 'calc(4px + env(safe-area-inset-top, 0px))', paddingTop: 'env(safe-area-inset-top, 0px)' }}
+      />
 
       {/* Navigation */}
       <nav className="bg-[#002A52]/80 backdrop-blur-sm border-b border-white/10 shadow-lg">
@@ -57,7 +60,10 @@ export function Root() {
       <Outlet />
 
       {/* Footer */}
-      <footer className="border-t border-white/10 mt-12 py-4">
+      <footer
+        className="border-t border-white/10 mt-12 pt-4"
+        style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}
+      >
         <div className="container mx-auto px-4 text-center">
           <p className="text-white/30 text-xs">
             Tecnológico de Monterrey · Campus Estado de México · Sistema de Monitoreo de Aforo
