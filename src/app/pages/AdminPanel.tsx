@@ -184,7 +184,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       </div>
 
       {/* Connection status */}
-      <div className={`flex items-center gap-2 px-4 py-2 rounded-xl border mb-6 text-sm ${
+      <div className={`flex items-center gap-2 px-4 py-2 rounded-xl border mb-3 text-sm ${
         connected
           ? 'bg-green-500/15 border-green-400/30 text-green-300'
           : 'bg-amber-500/15 border-amber-400/30 text-amber-300'
@@ -194,6 +194,17 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           : <><WifiOff className="w-4 h-4" /> Sin conexión con la Pi — los comandos no tendrán efecto</>
         }
       </div>
+
+      {/* Stale-script warning */}
+      {connected && todayEvents === null && (
+        <div className="flex items-start gap-2 px-4 py-3 rounded-xl border border-amber-400/30 bg-amber-500/10 text-amber-300 text-xs mb-6">
+          <span className="mt-0.5 shrink-0">⚠</span>
+          <span>
+            El script en la Raspberry Pi es una versión anterior y no envía el historial del día.
+            Actualiza y reinicia el script para ver entradas, salidas y registro completo.
+          </span>
+        </div>
+      )}
 
       {/* Count + Manual adjustment side by side */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
@@ -295,7 +306,11 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         {entries.length === 0 ? (
           <div className="text-center py-14">
             <Calendar className="w-14 h-14 text-white/20 mx-auto mb-4" />
-            <p className="text-white/30 text-sm">No hay actividad registrada hoy</p>
+            <p className="text-white/30 text-sm">
+              {todayEvents === null && connected
+                ? 'Historial no disponible — actualiza el script en la Pi'
+                : 'No hay actividad registrada hoy'}
+            </p>
           </div>
         ) : (
           <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
