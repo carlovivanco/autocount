@@ -28,15 +28,37 @@ FRAME_W, FRAME_H = 640, 480
 WS_PORT          = 8765
 PARQUET_FILE     = "conteo_horario.parquet"
 ML_MODEL_FILE    = "peak_model.joblib"
+COUNTER_STATE    = "contador_state.json"
 SAMPLE_INTERVAL  = 60        # segundos entre muestras
 RETRAIN_DAYS     = 14        # reentrenar cada N días
 
 DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
+
+def _load_counter_state() -> int:
+    """Restaura el contador del día actual al reiniciar el script."""
+    try:
+        with open(COUNTER_STATE) as f:
+            data = json.load(f)
+        if data.get("date") == datetime.now().strftime("%Y-%m-%d"):
+            return max(0, int(data.get("count", 0)))
+    except Exception:
+        pass
+    return 0
+
+
+def _save_counter_state():
+    try:
+        with open(COUNTER_STATE, "w") as f:
+            json.dump({"count": contador, "date": datetime.now().strftime("%Y-%m-%d")}, f)
+    except Exception:
+        pass
+
+
 # -------------------------------------------------
 # Estado global
 # -------------------------------------------------
-contador = 0
+contador = _load_counter_state()
 prev_cx: dict[int, int] = {}
 crossed: dict[int, bool] = {}
 _last_date: str = datetime.now().strftime("%Y-%m-%d")
@@ -182,10 +204,12 @@ async def _ws_handler(websocket):
                 if cmd == "increment":
                     contador += 1
                     _log_event("entrada")
+                    _save_counter_state()
                     await _broadcast(contador)
                 elif cmd == "decrement":
                     contador -= 1
                     _log_event("salida")
+                    _save_counter_state()
                     await _broadcast(contador)
                 elif cmd == "download_excel":
                     xlsx = _excel_bytes()
@@ -281,6 +305,7 @@ def _record_sample():
         crossed.clear()
         _hourly_samples.clear()
         _last_date = current_date
+        _save_counter_state()
         print(f"[Reset] Medianoche — contador reiniciado")
         if ws_loop and ws_loop.is_running():
             asyncio.run_coroutine_threadsafe(
@@ -391,6 +416,7 @@ try:
 
         if contador != prev_contador:
             broadcast_count()
+            _save_counter_state()
             prev_contador = contador
 
         _record_sample()

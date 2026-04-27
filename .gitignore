@@ -15,6 +15,7 @@ dist/
 *.parquet
 *.joblib
 eventos_*.json
+contador_state.json
 
 # Pre-trained base models (downloaded by ultralytics automatically)
 yolo*.pt
