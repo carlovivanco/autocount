@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-const WS_URL = (import.meta.env.VITE_WS_URL as string | undefined) ?? 'ws://raspberrypi.local:8765';
+const WS_URL = (import.meta.env.VITE_WS_URL as string | undefined) || 'ws://raspberrypi.local:8765';
 
 export type TodayEvent = { tipo: string; timestamp: string };
 
@@ -47,7 +47,13 @@ export function useCounterWebSocket(
     function connect() {
       if (unmounted) return;
       isFirstMessage.current = true;
-      const ws = new WebSocket(WS_URL);
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket(WS_URL);
+      } catch {
+        reconnectTimer = setTimeout(connect, 3000);
+        return;
+      }
       wsRef.current = ws;
 
       ws.onopen = () => {
