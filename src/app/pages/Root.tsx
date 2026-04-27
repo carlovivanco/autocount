@@ -1,13 +1,16 @@
 import { Outlet, Link, useLocation } from 'react-router';
-import { Activity, ClipboardList, ShieldCheck } from 'lucide-react';
+import { Activity, ShieldCheck } from 'lucide-react';
 
 export function Root() {
   const location = useLocation();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#001F3F] via-[#003865] to-[#001228]">
-      {/* Top accent stripe */}
-      <div className="h-1 bg-gradient-to-r from-[#0D6EBD] via-white to-[#0D6EBD]" />
+    <div className="min-h-dvh bg-gradient-to-br from-[#001F3F] via-[#003865] to-[#001228]">
+      {/* Top accent stripe — pushes down by the iOS status-bar safe area */}
+      <div
+        className="bg-gradient-to-r from-[#0D6EBD] via-white to-[#0D6EBD]"
+        style={{ height: 'calc(4px + env(safe-area-inset-top, 0px))', paddingTop: 'env(safe-area-inset-top, 0px)' }}
+      />
 
       {/* Navigation */}
       <nav className="bg-[#002A52]/80 backdrop-blur-sm border-b border-white/10 shadow-lg">
@@ -38,17 +41,6 @@ export function Root() {
                 Control en Vivo
               </Link>
               <Link
-                to="/registro"
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  location.pathname === '/registro'
-                    ? 'bg-white text-[#003865] shadow-md'
-                    : 'text-white/80 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                <ClipboardList className="w-4 h-4" />
-                Registro Diario
-              </Link>
-              <Link
                 to="/admin"
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                   location.pathname === '/admin'
@@ -68,7 +60,10 @@ export function Root() {
       <Outlet />
 
       {/* Footer */}
-      <footer className="border-t border-white/10 mt-12 py-4">
+      <footer
+        className="border-t border-white/10 mt-12 pt-4"
+        style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}
+      >
         <div className="container mx-auto px-4 text-center">
           <p className="text-white/30 text-xs">
             Tecnológico de Monterrey · Campus Estado de México · Sistema de Monitoreo de Aforo

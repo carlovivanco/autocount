@@ -1,5 +1,9 @@
-import { useState, useCallback } from 'react';
-import { Lock, LogOut, Plus, Minus, Download, ShieldCheck, Wifi, WifiOff } from 'lucide-react';
+import { useState, useCallback, useEffect, Component } from 'react';
+import type { TodayEvent } from '../hooks/useCounterWebSocket';
+import {
+  Lock, LogOut, Plus, Minus, Download, ShieldCheck,
+  Wifi, WifiOff, ArrowDownCircle, ArrowUpCircle, Calendar, TrendingUp,
+} from 'lucide-react';
 import { useCounterWebSocket } from '../hooks/useCounterWebSocket';
 
 const ADMIN_USER = (import.meta.env.VITE_ADMIN_USER as string | undefined) ?? 'admin';
@@ -73,10 +77,85 @@ function LoginForm({ onLogin }: { onLogin: () => void }) {
   );
 }
 
+type LogEntry = { type: 'entrada' | 'salida'; timestamp: Date };
+
+const todayKey = () => `gym_log_${new Date().toISOString().slice(0, 10)}`;
+
+function loadLog(): { entries: LogEntry[]; totalEntries: number; totalExits: number } {
+  try {
+    const raw = localStorage.getItem(todayKey());
+    if (!raw) return { entries: [], totalEntries: 0, totalExits: 0 };
+    const data = JSON.parse(raw) as {
+      entries: Array<{ type: string; timestamp: string }>;
+      totalEntries: number;
+      totalExits: number;
+    };
+    return {
+      entries: data.entries.map(e => ({
+        type: e.type as 'entrada' | 'salida',
+        timestamp: new Date(e.timestamp),
+      })),
+      totalEntries: data.totalEntries,
+      totalExits: data.totalExits,
+    };
+  } catch {
+    return { entries: [], totalEntries: 0, totalExits: 0 };
+  }
+}
+
+function saveLog(entries: LogEntry[], totalEntries: number, totalExits: number) {
+  try {
+    localStorage.setItem(todayKey(), JSON.stringify({
+      entries: entries.map(e => ({ type: e.type, timestamp: e.timestamp.toISOString() })),
+      totalEntries,
+      totalExits,
+    }));
+  } catch { /* ignore quota errors */ }
+}
+
+// Module-level log state — survives AdminDashboard remounts within the session
+let _log = loadLog();
+
 function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const [downloading, setDownloading] = useState(false);
+  const [entries, setEntries] = useState<LogEntry[]>(_log.entries);
+  const [totalEntries, setTotalEntries] = useState(_log.totalEntries);
+  const [totalExits, setTotalExits] = useState(_log.totalExits);
 
-  const { count, connected, sendCommand } = useCounterWebSocket(useCallback(() => {}, []));
+  const handleDelta = useCallback((delta: number) => {
+    const now = new Date();
+    const added = Array.from(
+      { length: Math.abs(delta) },
+      () => ({ type: (delta > 0 ? 'entrada' : 'salida') as 'entrada' | 'salida', timestamp: now }),
+    );
+    _log.entries = [..._log.entries, ...added];
+    if (delta > 0) _log.totalEntries += delta;
+    else _log.totalExits += Math.abs(delta);
+    saveLog(_log.entries, _log.totalEntries, _log.totalExits);
+    setEntries([..._log.entries]);
+    setTotalEntries(_log.totalEntries);
+    setTotalExits(_log.totalExits);
+  }, []);
+
+  const { count, connected, sendCommand, todayEvents } = useCounterWebSocket(handleDelta);
+
+  // Initialize log from backend's authoritative day events on connect / midnight reset
+  useEffect(() => {
+    if (todayEvents === null) return;
+    const loaded: LogEntry[] = todayEvents.map((e: TodayEvent) => ({
+      type: e.tipo as 'entrada' | 'salida',
+      timestamp: new Date(e.timestamp),
+    }));
+    const te = loaded.filter(e => e.type === 'entrada').length;
+    const tx = loaded.filter(e => e.type === 'salida').length;
+    _log.entries = loaded;
+    _log.totalEntries = te;
+    _log.totalExits = tx;
+    saveLog(loaded, te, tx);
+    setEntries([...loaded]);
+    setTotalEntries(te);
+    setTotalExits(tx);
+  }, [todayEvents]);
 
   const handleDownload = () => {
     setDownloading(true);
@@ -85,7 +164,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   };
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-2xl">
+    <div className="container mx-auto px-4 py-8 max-w-4xl">
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
@@ -105,7 +184,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       </div>
 
       {/* Connection status */}
-      <div className={`flex items-center gap-2 px-4 py-2 rounded-xl border mb-6 text-sm ${
+      <div className={`flex items-center gap-2 px-4 py-2 rounded-xl border mb-3 text-sm ${
         connected
           ? 'bg-green-500/15 border-green-400/30 text-green-300'
           : 'bg-amber-500/15 border-amber-400/30 text-amber-300'
@@ -116,41 +195,55 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         }
       </div>
 
-      {/* Current count */}
-      <div className="bg-white/8 backdrop-blur-md rounded-2xl border border-white/15 p-8 text-center mb-6">
-        <p className="text-white/40 text-xs uppercase tracking-widest mb-2">Personas actualmente</p>
-        <div className="text-8xl font-black text-white tabular-nums mb-2">{count}</div>
-        <p className="text-white/30 text-sm">Conteo en tiempo real</p>
-      </div>
+      {/* Stale-script warning */}
+      {connected && todayEvents === null && (
+        <div className="flex items-start gap-2 px-4 py-3 rounded-xl border border-amber-400/30 bg-amber-500/10 text-amber-300 text-xs mb-6">
+          <span className="mt-0.5 shrink-0">⚠</span>
+          <span>
+            El script en la Raspberry Pi es una versión anterior y no envía el historial del día.
+            Actualiza y reinicia el script para ver entradas, salidas y registro completo.
+          </span>
+        </div>
+      )}
 
-      {/* Manual adjustment */}
-      <div className="bg-white/8 backdrop-blur-md rounded-2xl border border-white/15 p-6 mb-6">
-        <h2 className="text-white font-semibold mb-1">Ajuste Manual</h2>
-        <p className="text-white/40 text-xs mb-5">
-          Usa estos botones para corregir el contador si la cámara no detectó una entrada o salida.
-        </p>
-        <div className="grid grid-cols-2 gap-4">
-          <button
-            onClick={() => sendCommand('increment')}
-            disabled={!connected}
-            className="flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold py-5 rounded-2xl transition-all text-lg"
-          >
-            <Plus className="w-6 h-6" />
-            Entrada (+1)
-          </button>
-          <button
-            onClick={() => sendCommand('decrement')}
-            disabled={!connected}
-            className="flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold py-5 rounded-2xl transition-all text-lg"
-          >
-            <Minus className="w-6 h-6" />
-            Salida (−1)
-          </button>
+      {/* Count + Manual adjustment side by side */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        <div className="bg-white/8 backdrop-blur-md rounded-2xl border border-white/15 p-8 text-center">
+          <p className="text-white/40 text-xs uppercase tracking-widest mb-2">Personas actualmente</p>
+          <div className="text-8xl font-black text-white tabular-nums mb-2">{count}</div>
+          <p className="text-white/30 text-sm">Conteo en tiempo real</p>
+        </div>
+
+        <div className="bg-white/8 backdrop-blur-md rounded-2xl border border-white/15 p-6 flex flex-col justify-between">
+          <div>
+            <h2 className="text-white font-semibold mb-1">Ajuste Manual</h2>
+            <p className="text-white/40 text-xs mb-5">
+              Corrige el contador si la cámara no detectó una entrada o salida.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              onClick={() => sendCommand('increment')}
+              disabled={!connected}
+              className="flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold py-5 rounded-2xl transition-all text-lg"
+            >
+              <Plus className="w-6 h-6" />
+              +1
+            </button>
+            <button
+              onClick={() => sendCommand('decrement')}
+              disabled={!connected}
+              className="flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold py-5 rounded-2xl transition-all text-lg"
+            >
+              <Minus className="w-6 h-6" />
+              −1
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Download */}
-      <div className="bg-white/8 backdrop-blur-md rounded-2xl border border-white/15 p-6">
+      {/* Export */}
+      <div className="bg-white/8 backdrop-blur-md rounded-2xl border border-white/15 p-6 mb-10">
         <h2 className="text-white font-semibold mb-1">Exportar Datos</h2>
         <p className="text-white/40 text-xs mb-5">
           Descarga el historial horario con predicciones de peak / off-peak en formato Excel.
@@ -163,6 +256,138 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           <Download className="w-4 h-4" />
           {downloading ? 'Generando archivo...' : 'Descargar Excel'}
         </button>
+      </div>
+
+      {/* Summary cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
+        <div className="bg-gradient-to-br from-green-600/80 to-green-700/80 backdrop-blur-md rounded-2xl shadow-lg p-6 border border-green-400/20">
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <p className="text-green-200 text-xs font-medium uppercase tracking-wide">Entradas Totales</p>
+              <h3 className="text-5xl font-black text-white mt-2 tabular-nums">{totalEntries}</h3>
+            </div>
+            <div className="bg-white/15 p-3 rounded-xl">
+              <ArrowUpCircle className="w-7 h-7 text-white" />
+            </div>
+          </div>
+          <p className="text-green-200/70 text-xs">Personas que ingresaron hoy</p>
+        </div>
+
+        <div className="bg-gradient-to-br from-red-600/80 to-red-700/80 backdrop-blur-md rounded-2xl shadow-lg p-6 border border-red-400/20">
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <p className="text-red-200 text-xs font-medium uppercase tracking-wide">Salidas Totales</p>
+              <h3 className="text-5xl font-black text-white mt-2 tabular-nums">{totalExits}</h3>
+            </div>
+            <div className="bg-white/15 p-3 rounded-xl">
+              <ArrowDownCircle className="w-7 h-7 text-white" />
+            </div>
+          </div>
+          <p className="text-red-200/70 text-xs">Personas que salieron hoy</p>
+        </div>
+
+        <div className="bg-gradient-to-br from-[#0D6EBD]/80 to-[#003865]/80 backdrop-blur-md rounded-2xl shadow-lg p-6 border border-blue-400/20">
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <p className="text-blue-200 text-xs font-medium uppercase tracking-wide">Personas Adentro</p>
+              <h3 className="text-5xl font-black text-white mt-2 tabular-nums">{count}</h3>
+            </div>
+            <div className="bg-white/15 p-3 rounded-xl">
+              <TrendingUp className="w-7 h-7 text-white" />
+            </div>
+          </div>
+          <p className="text-blue-200/70 text-xs">Flujo neto actual</p>
+        </div>
+      </div>
+
+      {/* Activity log */}
+      <div className="bg-white/8 backdrop-blur-md rounded-2xl shadow-lg p-8 border border-white/15 mb-6">
+        <h3 className="text-base font-bold text-white mb-5">Registro de Actividad</h3>
+        {entries.length === 0 ? (
+          <div className="text-center py-14">
+            <Calendar className="w-14 h-14 text-white/20 mx-auto mb-4" />
+            <p className="text-white/30 text-sm">
+              {todayEvents === null && connected
+                ? 'Historial no disponible — actualiza el script en la Pi'
+                : 'No hay actividad registrada hoy'}
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+            {entries
+              .slice()
+              .reverse()
+              .map((entry, index) => (
+                <div
+                  key={index}
+                  className={`flex items-center justify-between px-4 py-3 rounded-xl ${
+                    entry.type === 'entrada'
+                      ? 'bg-green-500/15 border border-green-400/20'
+                      : 'bg-red-500/15 border border-red-400/20'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    {entry.type === 'entrada' ? (
+                      <ArrowUpCircle className="w-5 h-5 text-green-400 flex-shrink-0" />
+                    ) : (
+                      <ArrowDownCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
+                    )}
+                    <div>
+                      <p className="text-white text-sm font-semibold capitalize">{entry.type}</p>
+                      <p className="text-white/40 text-xs">
+                        {entry.timestamp.toLocaleTimeString('es-MX', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit',
+                        })}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-white/30 text-xs">Detección automática</span>
+                </div>
+              ))}
+          </div>
+        )}
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div className="bg-white/8 backdrop-blur-md rounded-2xl shadow-lg p-6 border border-white/15">
+          <h3 className="text-base font-bold text-white mb-4">Estadísticas del Día</h3>
+          <div className="space-y-3">
+            <div className="flex justify-between items-center">
+              <span className="text-white/50 text-sm">Promedio por hora</span>
+              <span className="text-white font-semibold text-sm">
+                {totalEntries > 0
+                  ? Math.round(totalEntries / (new Date().getHours() || 1))
+                  : 0}{' '}
+                entradas
+              </span>
+            </div>
+            <div className="w-full h-px bg-white/10" />
+            <div className="flex justify-between items-center">
+              <span className="text-white/50 text-sm">Tasa de ocupación</span>
+              <span className="text-white font-semibold text-sm">
+                {Math.round((count / 40) * 100)}%
+              </span>
+            </div>
+            <div className="w-full h-px bg-white/10" />
+            <div className="flex justify-between items-center">
+              <span className="text-white/50 text-sm">Total de movimientos</span>
+              <span className="text-white font-semibold text-sm">{totalEntries + totalExits}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white/8 backdrop-blur-md rounded-2xl shadow-lg p-6 border border-white/15">
+          <h3 className="text-base font-bold text-white mb-4">Acerca del Sistema</h3>
+          <p className="text-white/50 text-sm leading-relaxed mb-3">
+            Los datos se registran automáticamente con el sistema de visión computarizada con IA instalado en la entrada del gimnasio.
+          </p>
+          <p className="text-white/30 text-xs leading-relaxed">
+            Tecnología: Raspberry Pi · IMX500 · MobileNetV2 · Precisión estimada 98 %
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -182,5 +407,33 @@ export function AdminPanel() {
     return <LoginForm onLogin={() => setAuthenticated(true)} />;
   }
 
-  return <AdminDashboard onLogout={handleLogout} />;
+  return (
+    <AdminErrorBoundary onReset={handleLogout}>
+      <AdminDashboard onLogout={handleLogout} />
+    </AdminErrorBoundary>
+  );
+}
+
+class AdminErrorBoundary extends Component<
+  { onReset: () => void; children: React.ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { onReset: () => void; children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch() {
+    sessionStorage.removeItem('admin_auth');
+    this.props.onReset();
+  }
+
+  render() {
+    if (this.state.hasError) return null;
+    return this.props.children;
+  }
 }
