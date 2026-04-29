@@ -488,8 +488,4 @@ except KeyboardInterrupt:
 finally:
     picam2.stop()
 
-<<<<<<< HEAD
 #python train.py --export runs/gym_tec_yolo11n/yolo11n_finetuned/weights/best.pt
-=======
-# python train.py --export runs/gym_tec_yolo11n/yolo11n_finetuned/weights/best.pt
->>>>>>> 5d53ddeeebcdd7a059658e8937c0efb8be515199
