@@ -61,8 +61,8 @@ export function Counter({ count, maxCapacity }: CounterProps) {
         <div className="h-3 bg-white/15 rounded-full overflow-hidden">
           <div
             className={`h-full rounded-full transition-all duration-500 ${
-              percentage < 65 ? 'bg-green-400' :
-              percentage < 90 ? 'bg-yellow-400' :
+              percentage < 66.7 ? 'bg-green-400' :
+              percentage < 100 ? 'bg-yellow-400' :
               percentage <= 100 ? 'bg-red-400' : 'bg-red-600'
             }`}
             style={{ width: `${Math.min(100, percentage)}%` }}
