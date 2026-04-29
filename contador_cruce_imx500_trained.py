@@ -448,9 +448,10 @@ imx500 = IMX500(MODEL)
 intrinsics = imx500.network_intrinsics or NetworkIntrinsics()
 intrinsics.task = "object detection"
 intrinsics.update_with_defaults()
-# Los modelos YOLO exportados al IMX500 emiten coordenadas normalizadas [0,1];
-# forzamos bbox_normalization para que parse_detections las divida correctamente.
+# Los modelos YOLO exportados al IMX500 emiten coordenadas normalizadas [0,1]
+# en orden (y1,x1,y2,x2); forzamos ambos flags para la transformación correcta.
 intrinsics.bbox_normalization = True
+intrinsics.bbox_order = "xy"
 
 picam2 = Picamera2(imx500.camera_num)
 config = picam2.create_preview_configuration(
