@@ -29,7 +29,7 @@ from ultralytics import YOLO
 # Configuración — ajusta según tu dataset
 # -------------------------------------------------
 BASE_MODEL = "yolo11n.pt"          # modelo preentrenado de partida
-DATA_YAML  = "dataset/data.yaml"   # ruta al archivo de configuración del dataset
+DATA_YAML  = "/home/pi/proyecto/autocount/dataset/data.yaml"   # ruta al archivo de configuración del dataset
 
 EPOCHS     = 100                  # máximo de epochs (early stopping puede parar antes)
 IMG_SIZE   = 640                   # resolución de entrenamiento
@@ -64,7 +64,7 @@ if __name__ == "__main__":
     # -------------------------------------------------
     # Fine-tuning
     # -------------------------------------------------
-    model = YOLO(BASE_MODEL)
+    '''model = YOLO(BASE_MODEL)
 
     result = model.train(
         data=DATA_YAML,
@@ -127,8 +127,8 @@ if __name__ == "__main__":
     )
     print(f"mAP50:    {metrics.box.map50:.3f}")
     print(f"mAP50-95: {metrics.box.map:.3f}")
-
+    
     print("\nPara usar el modelo afinado en el contador, cambia en contador_cruce.py:")
     print(f'  MODEL_PATH = "{best_pt}"')
     print(f'\nPara exportar a IMX500 (en la Pi):')
-    print(f'  python train.py --export "{best_pt}"')
+    print(f'  python train.py --export "{best_pt}"')'''

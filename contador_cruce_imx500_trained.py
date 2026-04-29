@@ -24,7 +24,7 @@ from sklearn.ensemble import RandomForestClassifier
 #   1. python train.py           → best.pt  +  best_imx_model/packerOut.zip
 #   2. imx500-package packerOut.zip          → network.rpk  (ejecutar en la Pi)
 #   3. Actualiza MODEL con la ruta al .rpk resultante.
-MODEL = "/ruta/al/modelo_entrenado.rpk"   # <-- ACTUALIZA ESTA RUTA
+MODEL = "/home/pi/proyecto/autocount/runs/detect/runs/gym_tec_yolo11n/yolo11n_finetuned/weights/best_imx_model/rpk_out/network.rpk"   # <-- ACTUALIZA ESTA RUTA
 
 THRESHOLD        = 0.55
 LINE_X           = 320
