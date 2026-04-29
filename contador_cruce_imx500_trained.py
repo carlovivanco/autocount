@@ -459,7 +459,7 @@ config = picam2.create_preview_configuration(
 )
 imx500.show_network_fw_progress_bar()
 picam2.pre_callback = draw_overlay
-picam2.start(config, show_preview=True)
+picam2.start(config, show_preview=False)
 if intrinsics.preserve_aspect_ratio:
     imx500.set_auto_aspect_ratio()
 
