@@ -35,10 +35,31 @@ PERSON_CLASS_ID  = 0
 WS_PORT         = 8765
 PARQUET_FILE    = "conteo_horario.parquet"
 ML_MODEL_FILE   = "peak_model.joblib"
+COUNTER_STATE   = "contador_state.json"
 SAMPLE_INTERVAL = 60
 RETRAIN_DAYS    = 30
 
 DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+
+
+def _load_counter_state() -> int:
+    try:
+        with open(COUNTER_STATE) as f:
+            data = json.load(f)
+        if data.get("date") == datetime.now().strftime("%Y-%m-%d"):
+            return max(0, int(data.get("count", 0)))
+    except Exception:
+        pass
+    return 0
+
+
+def _save_counter_state():
+    try:
+        with open(COUNTER_STATE, "w") as f:
+            json.dump({"count": contador, "date": datetime.now().strftime("%Y-%m-%d")}, f)
+    except Exception:
+        pass
+
 
 # -------------------------------------------------
 # Estado global
@@ -46,7 +67,7 @@ DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Doming
 last_detections = []
 tracks = {}
 next_id = 0
-contador = 0
+contador = _load_counter_state()
 _last_date: str = datetime.now().strftime("%Y-%m-%d")
 
 # -------------------------------------------------
@@ -185,10 +206,12 @@ async def _ws_handler(websocket):
                 if cmd == "increment":
                     contador += 1
                     _log_event("entrada")
+                    _save_counter_state()
                     await _broadcast(contador)
                 elif cmd == "decrement":
                     contador -= 1
                     _log_event("salida")
+                    _save_counter_state()
                     await _broadcast(contador)
                 elif cmd == "download_excel":
                     xlsx = _excel_bytes()
@@ -283,6 +306,7 @@ def _record_sample():
         tracks.clear()
         _hourly_samples.clear()
         _last_date = current_date
+        _save_counter_state()
         print(f"[Reset] Medianoche — contador reiniciado")
         if ws_loop and ws_loop.is_running():
             asyncio.run_coroutine_threadsafe(
@@ -352,9 +376,12 @@ def distancia(x1, y1, x2, y2):
 def actualizar_tracks(detections):
     global tracks, next_id, contador
     dets = []
+    # Área aproximada del frame de preview (640×480 típico del IMX500)
+    _MAX_BOX_AREA = 150_000
     for det in detections:
         x, y, w, h = [int(v) for v in det.box]
-        if w * h < 1500:
+        area = w * h
+        if area < 1500 or area > _MAX_BOX_AREA:
             continue
         dets.append({"x1": x, "y1": y, "x2": x+w, "y2": y+h,
                      "cx": x+w//2, "cy": y+h//2, "conf": det.conf})
@@ -421,6 +448,9 @@ imx500 = IMX500(MODEL)
 intrinsics = imx500.network_intrinsics or NetworkIntrinsics()
 intrinsics.task = "object detection"
 intrinsics.update_with_defaults()
+# Los modelos YOLO exportados al IMX500 emiten coordenadas normalizadas [0,1];
+# forzamos bbox_normalization para que parse_detections las divida correctamente.
+intrinsics.bbox_normalization = True
 
 picam2 = Picamera2(imx500.camera_num)
 config = picam2.create_preview_configuration(
@@ -447,6 +477,7 @@ try:
 
         if contador != prev_contador:
             broadcast_count()
+            _save_counter_state()
             prev_contador = contador
 
         _record_sample()
