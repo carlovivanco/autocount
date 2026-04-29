@@ -4,7 +4,7 @@ import { Counter } from '../components/Counter';
 import { Users, AlertTriangle, Clock, MapPin } from 'lucide-react';
 import { useCounterWebSocket } from '../hooks/useCounterWebSocket';
 
-const MAX_CAPACITY = 40;
+const MAX_CAPACITY = 60;
 
 export function Dashboard() {
   const [currentCount, setCurrentCount] = useState(0);
@@ -102,15 +102,15 @@ export function Dashboard() {
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
               <span className="text-white/60">Lunes – Viernes</span>
-              <span className="text-white font-medium">6:00 – 22:00</span>
+              <span className="text-white font-medium">6:00 – 21:00</span>
             </div>
             <div className="flex justify-between">
               <span className="text-white/60">Sábado</span>
-              <span className="text-white font-medium">7:00 – 18:00</span>
+              <span className="text-white font-medium">8:00 – 12:00</span>
             </div>
             <div className="flex justify-between">
               <span className="text-white/60">Domingo</span>
-              <span className="text-white font-medium">8:00 – 14:00</span>
+              <span className="text-white font-medium">Cerrado</span>
             </div>
           </div>
         </div>

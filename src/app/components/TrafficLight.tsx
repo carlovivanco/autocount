@@ -6,8 +6,8 @@ interface TrafficLightProps {
 
 export function TrafficLight({ percentage, currentCount, maxCapacity }: TrafficLightProps) {
   const getStatus = () => {
-    if (percentage < 65) return 'green';
-    if (percentage < 90) return 'yellow';
+    if (percentage < 66.7) return 'green';
+    if (percentage < 100) return 'yellow';
     if (percentage <= 100) return 'red';
     return 'critical';
   };

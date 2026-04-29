@@ -7,7 +7,7 @@ import math
 import os
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import joblib
 import pandas as pd
@@ -35,10 +35,31 @@ PERSON_CLASS_ID  = 0
 WS_PORT         = 8765
 PARQUET_FILE    = "conteo_horario.parquet"
 ML_MODEL_FILE   = "peak_model.joblib"
+COUNTER_STATE   = "contador_state.json"
 SAMPLE_INTERVAL = 60
 RETRAIN_DAYS    = 30
 
 DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+
+
+def _load_counter_state() -> int:
+    try:
+        with open(COUNTER_STATE) as f:
+            data = json.load(f)
+        if data.get("date") == datetime.now().strftime("%Y-%m-%d"):
+            return max(0, int(data.get("count", 0)))
+    except Exception:
+        pass
+    return 0
+
+
+def _save_counter_state():
+    try:
+        with open(COUNTER_STATE, "w") as f:
+            json.dump({"count": contador, "date": datetime.now().strftime("%Y-%m-%d")}, f)
+    except Exception:
+        pass
+
 
 # -------------------------------------------------
 # Estado global
@@ -46,7 +67,8 @@ DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Doming
 last_detections = []
 tracks = {}
 next_id = 0
-contador = 0
+contador = _load_counter_state()
+_last_date: str = datetime.now().strftime("%Y-%m-%d")
 
 # -------------------------------------------------
 # WebSocket
@@ -58,21 +80,110 @@ ws_loop: asyncio.AbstractEventLoop | None = None
 def _excel_bytes() -> bytes:
     if not os.path.exists(PARQUET_FILE):
         return b""
+
     df = pd.read_parquet(PARQUET_FILE)
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+
     if os.path.exists(ML_MODEL_FILE) and len(df) >= 24:
-        model = joblib.load(ML_MODEL_FILE)
-        df["prediccion"] = model.predict(df[["hora", "dia_semana"]])
-        df["prediccion"] = df["prediccion"].map({1: "Peak", 0: "Off-peak"})
+        clf = joblib.load(ML_MODEL_FILE)
+        df["clasificacion"] = clf.predict(df[["hora", "dia_semana"]])
+        df["clasificacion"] = df["clasificacion"].map({1: "Peak", 0: "Off-peak"})
+    else:
+        df["clasificacion"] = "—"
+
+    today = datetime.now()
+    week_start = (today - timedelta(days=today.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+
+    cur = df[df["timestamp"] >= week_start].copy()
+    cur["hora_str"] = cur["hora"].apply(lambda h: f"{h:02d}:00")
+    sheet1 = cur[["timestamp", "dia_nombre", "hora_str", "promedio_personas", "clasificacion"]].rename(columns={
+        "timestamp":         "Fecha/Hora",
+        "dia_nombre":        "Día",
+        "hora_str":          "Hora",
+        "promedio_personas": "Personas (prom. hora)",
+        "clasificacion":     "Clasificación",
+    })
+
+    past = df[df["timestamp"] < week_start].copy()
+
+    if not past.empty:
+        iso = past["timestamp"].dt.isocalendar()
+        past["semana"] = iso.year.astype(str) + "-S" + iso.week.astype(str).str.zfill(2)
+        sheet2 = (
+            past.groupby(["semana", "dia_semana", "dia_nombre"])["promedio_personas"]
+            .mean().round(2).reset_index()
+            .sort_values(["semana", "dia_semana"])
+            [["semana", "dia_nombre", "promedio_personas"]]
+            .rename(columns={"semana": "Semana", "dia_nombre": "Día",
+                              "promedio_personas": "Promedio personas"})
+        )
+    else:
+        sheet2 = pd.DataFrame(columns=["Semana", "Día", "Promedio personas"])
+
+    if not past.empty:
+        past["mes"] = past["timestamp"].dt.strftime("%Y-%m")
+        sheet3 = (
+            past.groupby(["mes", "dia_semana", "dia_nombre"])["promedio_personas"]
+            .mean().round(2).reset_index()
+            .sort_values(["mes", "dia_semana"])
+            [["mes", "dia_nombre", "promedio_personas"]]
+            .rename(columns={"mes": "Mes", "dia_nombre": "Día",
+                              "promedio_personas": "Promedio personas"})
+        )
+    else:
+        sheet3 = pd.DataFrame(columns=["Mes", "Día", "Promedio personas"])
+
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Conteo Horario")
+        sheet1.to_excel(writer, index=False, sheet_name="Semana Actual")
+        sheet2.to_excel(writer, index=False, sheet_name="Semanas Anteriores")
+        sheet3.to_excel(writer, index=False, sheet_name="Meses Anteriores")
     return buf.getvalue()
+
+
+def _today_events_file() -> str:
+    return f"eventos_{datetime.now().strftime('%Y-%m-%d')}.json"
+
+
+def _load_today_events() -> list:
+    path = _today_events_file()
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def _log_event(tipo: str):
+    events = _load_today_events()
+    events.append({"tipo": tipo, "timestamp": datetime.now().isoformat()})
+    try:
+        with open(_today_events_file(), "w") as f:
+            json.dump(events, f)
+    except Exception:
+        pass
+
+
+def _current_peak_prediction() -> str | None:
+    if not os.path.exists(ML_MODEL_FILE):
+        return None
+    try:
+        clf = joblib.load(ML_MODEL_FILE)
+        now = datetime.now()
+        result = clf.predict([[now.hour, now.weekday()]])[0]
+        return "Peak" if result == 1 else "Off-peak"
+    except Exception:
+        return None
 
 
 async def _broadcast(count: int):
     if not ws_clients:
         return
-    msg = json.dumps({"count": count})
+    msg = json.dumps({"count": count, "peak_prediction": _current_peak_prediction()})
     await asyncio.gather(
         *[c.send(msg) for c in list(ws_clients)],
         return_exceptions=True,
@@ -83,16 +194,24 @@ async def _ws_handler(websocket):
     global contador
     ws_clients.add(websocket)
     try:
-        await websocket.send(json.dumps({"count": contador}))
+        await websocket.send(json.dumps({
+            "count": contador,
+            "peak_prediction": _current_peak_prediction(),
+            "today_events": _load_today_events(),
+        }))
         async for raw in websocket:
             try:
                 data = json.loads(raw)
                 cmd = data.get("command", "")
                 if cmd == "increment":
                     contador += 1
+                    _log_event("entrada")
+                    _save_counter_state()
                     await _broadcast(contador)
                 elif cmd == "decrement":
                     contador -= 1
+                    _log_event("salida")
+                    _save_counter_state()
                     await _broadcast(contador)
                 elif cmd == "download_excel":
                     xlsx = _excel_bytes()
@@ -113,6 +232,13 @@ async def _ws_handler(websocket):
 def broadcast_count():
     if ws_loop and ws_loop.is_running():
         asyncio.run_coroutine_threadsafe(_broadcast(contador), ws_loop)
+
+
+async def _broadcast_midnight_reset():
+    if not ws_clients:
+        return
+    msg = json.dumps({"count": 0, "peak_prediction": None, "midnight_reset": True})
+    await asyncio.gather(*[c.send(msg) for c in list(ws_clients)], return_exceptions=True)
 
 
 def _start_ws_server():
@@ -168,11 +294,24 @@ def _train_model():
 
 
 def _record_sample():
-    global _last_sample_time, _last_hour, _hourly_samples
+    global _last_sample_time, _last_hour, _hourly_samples, contador, _last_date
 
     now_ts = time.time()
     now_dt = datetime.fromtimestamp(now_ts)
     current_hour = now_dt.replace(minute=0, second=0, microsecond=0)
+    current_date = now_dt.strftime("%Y-%m-%d")
+
+    if current_date != _last_date:
+        contador = 0
+        tracks.clear()
+        _hourly_samples.clear()
+        _last_date = current_date
+        _save_counter_state()
+        print(f"[Reset] Medianoche — contador reiniciado")
+        if ws_loop and ws_loop.is_running():
+            asyncio.run_coroutine_threadsafe(
+                _broadcast_midnight_reset(), ws_loop
+            )
 
     if now_ts - _last_sample_time >= SAMPLE_INTERVAL:
         _hourly_samples.append(contador)
@@ -197,6 +336,7 @@ def _record_sample():
                 _train_model()
         _hourly_samples.clear()
         _last_hour = current_hour
+        broadcast_count()
 
 
 # -------------------------------------------------
@@ -236,9 +376,12 @@ def distancia(x1, y1, x2, y2):
 def actualizar_tracks(detections):
     global tracks, next_id, contador
     dets = []
+    # Área aproximada del frame de preview (640×480 típico del IMX500)
+    _MAX_BOX_AREA = 150_000
     for det in detections:
         x, y, w, h = [int(v) for v in det.box]
-        if w * h < 1500:
+        area = w * h
+        if area < 1500 or area > _MAX_BOX_AREA:
             continue
         dets.append({"x1": x, "y1": y, "x2": x+w, "y2": y+h,
                      "cx": x+w//2, "cy": y+h//2, "conf": det.conf})
@@ -276,9 +419,11 @@ def actualizar_tracks(detections):
         if not tr["counted"] and px < LINE_X <= cx:
             contador += 1
             tr["counted"] = True
+            _log_event("entrada")
         elif not tr["counted"] and px > LINE_X >= cx and contador > 0:
             contador -= 1
             tr["counted"] = True
+            _log_event("salida")
         if abs(cx - LINE_X) > 100:
             tr["counted"] = False
 
@@ -303,6 +448,9 @@ imx500 = IMX500(MODEL)
 intrinsics = imx500.network_intrinsics or NetworkIntrinsics()
 intrinsics.task = "object detection"
 intrinsics.update_with_defaults()
+# Los modelos YOLO exportados al IMX500 emiten coordenadas normalizadas [0,1];
+# forzamos bbox_normalization para que parse_detections las divida correctamente.
+intrinsics.bbox_normalization = True
 
 picam2 = Picamera2(imx500.camera_num)
 config = picam2.create_preview_configuration(
@@ -329,6 +477,7 @@ try:
 
         if contador != prev_contador:
             broadcast_count()
+            _save_counter_state()
             prev_contador = contador
 
         _record_sample()
@@ -339,4 +488,8 @@ except KeyboardInterrupt:
 finally:
     picam2.stop()
 
+<<<<<<< HEAD
 #python train.py --export runs/gym_tec_yolo11n/yolo11n_finetuned/weights/best.pt
+=======
+# python train.py --export runs/gym_tec_yolo11n/yolo11n_finetuned/weights/best.pt
+>>>>>>> 5d53ddeeebcdd7a059658e8937c0efb8be515199

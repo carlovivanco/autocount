@@ -368,7 +368,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             <div className="flex justify-between items-center">
               <span className="text-white/50 text-sm">Tasa de ocupación</span>
               <span className="text-white font-semibold text-sm">
-                {Math.round((count / 40) * 100)}%
+                {Math.round((count / 60) * 100)}%
               </span>
             </div>
             <div className="w-full h-px bg-white/10" />
