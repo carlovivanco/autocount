@@ -12,7 +12,7 @@
 # ─────────────────────────────────────────────────────────────
 set -e
 
-SCRIPT="${1:-contador_cruce_imx500.py}"
+SCRIPT="${1:-contador_cruce_imx500_trained.py}"
 WORKDIR="$(cd "$(dirname "$0")/.." && pwd)"
 RUN_USER="$(whoami)"
 PYTHON="$(command -v python3)"
