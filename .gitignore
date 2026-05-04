@@ -10,6 +10,7 @@ runs/**
 
 # Generated/local files
 node_modules/
+relay/node_modules/
 dist/
 .env.local
 *.parquet

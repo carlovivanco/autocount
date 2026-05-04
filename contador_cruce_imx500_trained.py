@@ -32,7 +32,8 @@ MAX_DISTANCE     = 80
 MAX_MISSES       = 10
 PERSON_CLASS_ID  = 0
 
-WS_PORT         = 8765
+RELAY_URL       = os.getenv("RELAY_URL", "wss://autocount-relay.onrender.com")
+PI_TOKEN        = os.getenv("PI_TOKEN",  "autocount-pi-secret")
 PARQUET_FILE    = "conteo_horario.parquet"
 ML_MODEL_FILE   = "peak_model.joblib"
 COUNTER_STATE   = "contador_state.json"
@@ -73,7 +74,7 @@ _last_date: str = datetime.now().strftime("%Y-%m-%d")
 # -------------------------------------------------
 # WebSocket
 # -------------------------------------------------
-ws_clients: set = set()
+ws_connection = None
 ws_loop: asyncio.AbstractEventLoop | None = None
 
 
@@ -181,52 +182,59 @@ def _current_peak_prediction() -> str | None:
 
 
 async def _broadcast(count: int):
-    if not ws_clients:
+    global ws_connection
+    if ws_connection is None:
         return
-    msg = json.dumps({"count": count, "peak_prediction": _current_peak_prediction()})
-    await asyncio.gather(
-        *[c.send(msg) for c in list(ws_clients)],
-        return_exceptions=True,
-    )
-
-
-async def _ws_handler(websocket):
-    global contador
-    ws_clients.add(websocket)
     try:
-        await websocket.send(json.dumps({
-            "count": contador,
-            "peak_prediction": _current_peak_prediction(),
-            "today_events": _load_today_events(),
-        }))
-        async for raw in websocket:
-            try:
-                data = json.loads(raw)
-                cmd = data.get("command", "")
-                if cmd == "increment":
-                    contador += 1
-                    _log_event("entrada")
-                    _save_counter_state()
-                    await _broadcast(contador)
-                elif cmd == "decrement":
-                    contador -= 1
-                    _log_event("salida")
-                    _save_counter_state()
-                    await _broadcast(contador)
-                elif cmd == "download_excel":
-                    xlsx = _excel_bytes()
-                    if xlsx:
-                        b64 = base64.b64encode(xlsx).decode()
-                        await websocket.send(json.dumps({
-                            "excel_b64": b64,
-                            "filename": "conteo_horario.xlsx",
-                        }))
-                    else:
-                        await websocket.send(json.dumps({"error": "Sin datos aún"}))
-            except Exception:
-                pass
-    finally:
-        ws_clients.discard(websocket)
+        msg = json.dumps({"count": count, "peak_prediction": _current_peak_prediction()})
+        await ws_connection.send(msg)
+    except Exception:
+        pass
+
+
+async def _ws_client_loop():
+    global ws_connection, contador
+    url = f"{RELAY_URL}?token={PI_TOKEN}"
+    while True:
+        try:
+            async with websockets.connect(url) as ws:
+                ws_connection = ws
+                print(f"[Relay] Conectado a {RELAY_URL}")
+                await ws.send(json.dumps({
+                    "count": contador,
+                    "peak_prediction": _current_peak_prediction(),
+                    "today_events": _load_today_events(),
+                }))
+                async for raw in ws:
+                    try:
+                        data = json.loads(raw)
+                        cmd = data.get("command", "")
+                        if cmd == "increment":
+                            contador += 1
+                            _log_event("entrada")
+                            _save_counter_state()
+                            await _broadcast(contador)
+                        elif cmd == "decrement":
+                            contador -= 1
+                            _log_event("salida")
+                            _save_counter_state()
+                            await _broadcast(contador)
+                        elif cmd == "download_excel":
+                            xlsx = _excel_bytes()
+                            if xlsx:
+                                b64 = base64.b64encode(xlsx).decode()
+                                await ws.send(json.dumps({
+                                    "excel_b64": b64,
+                                    "filename": "conteo_horario.xlsx",
+                                }))
+                            else:
+                                await ws.send(json.dumps({"error": "Sin datos aún"}))
+                    except Exception:
+                        pass
+        except Exception as e:
+            ws_connection = None
+            print(f"[Relay] Desconectado ({e}). Reconectando en 5s…")
+            await asyncio.sleep(5)
 
 
 def broadcast_count():
@@ -235,23 +243,21 @@ def broadcast_count():
 
 
 async def _broadcast_midnight_reset():
-    if not ws_clients:
+    global ws_connection
+    if ws_connection is None:
         return
-    msg = json.dumps({"count": 0, "peak_prediction": None, "midnight_reset": True})
-    await asyncio.gather(*[c.send(msg) for c in list(ws_clients)], return_exceptions=True)
+    try:
+        msg = json.dumps({"count": 0, "peak_prediction": None, "midnight_reset": True})
+        await ws_connection.send(msg)
+    except Exception:
+        pass
 
 
-def _start_ws_server():
+def _start_ws_client():
     global ws_loop
     ws_loop = asyncio.new_event_loop()
     asyncio.set_event_loop(ws_loop)
-
-    async def _serve():
-        async with websockets.serve(_ws_handler, "0.0.0.0", WS_PORT):
-            print(f"WebSocket escuchando en ws://0.0.0.0:{WS_PORT}")
-            await asyncio.Future()
-
-    ws_loop.run_until_complete(_serve())
+    ws_loop.run_until_complete(_ws_client_loop())
 
 
 # -------------------------------------------------
@@ -463,7 +469,7 @@ picam2.start(config, show_preview=False)
 if intrinsics.preserve_aspect_ratio:
     imx500.set_auto_aspect_ratio()
 
-threading.Thread(target=_start_ws_server, daemon=True).start()
+threading.Thread(target=_start_ws_client, daemon=True).start()
 print("Presiona Ctrl+C para salir")
 
 # -------------------------------------------------

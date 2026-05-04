@@ -57,14 +57,21 @@ export function useCounterWebSocket(
       wsRef.current = ws;
 
       ws.onopen = () => {
-        if (!unmounted) setConnected(true);
+        // connected state is driven by pi_connected messages from relay
       };
 
       ws.onmessage = (event) => {
         if (unmounted) return;
         try {
           const data = JSON.parse(event.data as string) as Record<string, unknown>;
+
+          if ('pi_connected' in data) {
+            setConnected(data.pi_connected as boolean);
+            return;
+          }
+
           if ('count' in data) {
+            setConnected(true);
             const newCount = typeof data.count === 'number' ? data.count : 0;
 
             if ('midnight_reset' in data && data.midnight_reset) {
