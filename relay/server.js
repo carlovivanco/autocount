@@ -6,8 +6,19 @@ const PI_TOKEN  = process.env.PI_TOKEN   || 'autocount-pi-secret';
 const wss = new WebSocket.Server({ port: PORT });
 
 let piSocket    = null;
-let lastPiState = null;
+let lastPiState = null; // always kept as full state (includes today_events)
 const frontendClients = new Set();
+
+function mergeState(incoming) {
+  if (!lastPiState) { lastPiState = incoming; return; }
+  const state   = JSON.parse(lastPiState);
+  const parsed  = JSON.parse(incoming);
+  if (parsed.count          !== undefined) state.count          = parsed.count;
+  if (parsed.peak_prediction !== undefined) state.peak_prediction = parsed.peak_prediction;
+  if (parsed.today_events   !== undefined) state.today_events   = parsed.today_events;
+  if (parsed.midnight_reset)               state.today_events   = [];
+  lastPiState = JSON.stringify(state);
+}
 
 function broadcast(message) {
   for (const client of frontendClients) {
@@ -29,7 +40,7 @@ wss.on('connection', (ws, req) => {
       const str = data.toString();
       try {
         const parsed = JSON.parse(str);
-        if (!parsed.excel_b64) lastPiState = str; // cache state; skip large blobs
+        if (!parsed.excel_b64) mergeState(str); // keep full state; skip large blobs
       } catch {}
       broadcast(str);
     });
