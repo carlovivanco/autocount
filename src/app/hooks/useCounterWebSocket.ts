@@ -4,11 +4,14 @@ const WS_URL = (import.meta.env.VITE_WS_URL as string | undefined) || 'ws://rasp
 
 export type TodayEvent = { tipo: string; timestamp: string };
 
+export type PeakSchedule = Record<string, number[]>;
+
 interface CounterWebSocketResult {
   count: number;
   connected: boolean;
   peakPrediction: string | null;
   todayEvents: TodayEvent[] | null;
+  peakSchedule: PeakSchedule | null;
   sendCommand: (cmd: string) => void;
 }
 
@@ -34,6 +37,7 @@ export function useCounterWebSocket(
   const [connected, setConnected] = useState(false);
   const [peakPrediction, setPeakPrediction] = useState<string | null>(null);
   const [todayEvents, setTodayEvents] = useState<TodayEvent[] | null>(null);
+  const [peakSchedule, setPeakSchedule] = useState<PeakSchedule | null>(null);
   const prevCountRef = useRef(0);
   const isFirstMessage = useRef(true);
   const onDeltaRef = useRef(onDelta);
@@ -99,6 +103,9 @@ export function useCounterWebSocket(
             if ('peak_prediction' in data) {
               setPeakPrediction(typeof data.peak_prediction === 'string' ? data.peak_prediction : null);
             }
+            if ('peak_schedule' in data && data.peak_schedule) {
+              setPeakSchedule(data.peak_schedule as PeakSchedule);
+            }
           } else if ('excel_b64' in data) {
             triggerExcelDownload(data.excel_b64 as string, data.filename as string);
           }
@@ -134,5 +141,5 @@ export function useCounterWebSocket(
     }
   }, []);
 
-  return { count, connected, peakPrediction, todayEvents, sendCommand };
+  return { count, connected, peakPrediction, todayEvents, peakSchedule, sendCommand };
 }

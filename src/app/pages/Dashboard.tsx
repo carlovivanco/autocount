@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { TrafficLight } from '../components/TrafficLight';
 import { Counter } from '../components/Counter';
+import { PeakScheduleCard } from '../components/PeakSchedule';
 import { Users, AlertTriangle, Clock, MapPin } from 'lucide-react';
 import { useCounterWebSocket } from '../hooks/useCounterWebSocket';
 
@@ -10,7 +11,7 @@ export function Dashboard() {
   const [currentCount, setCurrentCount] = useState(0);
   const [showAlert, setShowAlert] = useState(false);
 
-  const { count: wsCount, connected: wsConnected, peakPrediction } = useCounterWebSocket(useCallback(() => {}, []));
+  const { count: wsCount, connected: wsConnected, peakPrediction, peakSchedule } = useCounterWebSocket(useCallback(() => {}, []));
 
   useEffect(() => {
     if (wsConnected) setCurrentCount(wsCount);
@@ -91,6 +92,13 @@ export function Dashboard() {
           />
         </div>
       </div>
+
+      {/* Peak Schedule */}
+      {peakSchedule && (
+        <div className="bg-white/8 backdrop-blur-md rounded-2xl p-6 border border-white/15 mb-6">
+          <PeakScheduleCard schedule={peakSchedule} />
+        </div>
+      )}
 
       {/* Info Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

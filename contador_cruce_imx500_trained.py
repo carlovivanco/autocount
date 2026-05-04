@@ -181,6 +181,23 @@ def _current_peak_prediction() -> str | None:
         return None
 
 
+def _get_peak_schedule() -> dict | None:
+    if not os.path.exists(ML_MODEL_FILE):
+        return None
+    try:
+        clf = joblib.load(ML_MODEL_FILE)
+        schedule = {}
+        for dia_n, dia_nombre in enumerate(DIAS):
+            peak_hours = [
+                hora for hora in range(6, 22)
+                if clf.predict([[hora, dia_n]])[0] == 1
+            ]
+            schedule[dia_nombre] = peak_hours
+        return schedule
+    except Exception:
+        return None
+
+
 async def _broadcast(count: int):
     global ws_connection
     if ws_connection is None:
@@ -204,6 +221,7 @@ async def _ws_client_loop():
                     "count": contador,
                     "peak_prediction": _current_peak_prediction(),
                     "today_events": _load_today_events(),
+                    "peak_schedule": _get_peak_schedule(),
                 }))
                 async for raw in ws:
                     try:
