@@ -175,7 +175,7 @@ def _current_peak_prediction() -> str | None:
     try:
         clf = joblib.load(ML_MODEL_FILE)
         now = datetime.now()
-        result = clf.predict([[now.hour, now.weekday()]])[0]
+        result = clf.predict(pd.DataFrame([[now.hour, now.weekday()]], columns=["hora", "dia_semana"]))[0]
         return "Peak" if result == 1 else "Off-peak"
     except Exception:
         return None
@@ -190,7 +190,7 @@ def _get_peak_schedule() -> dict | None:
         for dia_n, dia_nombre in enumerate(DIAS):
             peak_hours = [
                 hora for hora in range(6, 22)
-                if clf.predict([[hora, dia_n]])[0] == 1
+                if clf.predict(pd.DataFrame([[hora, dia_n]], columns=["hora", "dia_semana"]))[0] == 1
             ]
             schedule[dia_nombre] = peak_hours
         return schedule
