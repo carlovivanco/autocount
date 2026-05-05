@@ -1,6 +1,6 @@
 # AutoCount — Gimnasio Tec de Monterrey Campus Estado de México
 
-Sistema de monitoreo de aforo en tiempo real usando una Raspberry Pi con cámara IMX500 o webcam USB, YOLO26n, y un dashboard web desplegado en Vercel.
+Sistema de monitoreo de aforo en tiempo real usando una Raspberry Pi con cámara IMX500, YOLO11n, y un dashboard web desplegado en Vercel.
 
 ---
 
@@ -8,11 +8,11 @@ Sistema de monitoreo de aforo en tiempo real usando una Raspberry Pi con cámara
 
 1. [Arquitectura](#arquitectura)
 2. [Requisitos](#requisitos)
-3. [Raspberry Pi — Backend](#raspberry-pi--backend)
-4. [Frontend — Desarrollo local](#frontend--desarrollo-local)
-5. [Despliegue en Vercel](#despliegue-en-vercel)
-6. [Exponer el Pi a internet (Cloudflare Tunnel)](#exponer-el-pi-a-internet-cloudflare-tunnel)
-7. [Arranque automático](#arranque-automático)
+3. [Relay Server — Render](#relay-server--render)
+4. [Raspberry Pi — Backend](#raspberry-pi--backend)
+5. [Frontend — Desarrollo local](#frontend--desarrollo-local)
+6. [Despliegue en Vercel](#despliegue-en-vercel)
+7. [Arranque automático (plug-and-play)](#arranque-automático-plug-and-play)
 8. [Panel de administración](#panel-de-administración)
 9. [Entrenamiento del modelo YOLO](#entrenamiento-del-modelo-yolo)
 10. [Datos y modelo ML de peak hours](#datos-y-modelo-ml-de-peak-hours)
@@ -25,18 +25,25 @@ Sistema de monitoreo de aforo en tiempo real usando una Raspberry Pi con cámara
 ## Arquitectura
 
 ```
-Raspberry Pi (cámara IMX500 o webcam)
-  └── contador_cruce.py  /  contador_cruce_imx500.py
-        ├── YOLO26n / MobileNetV2 — detección de personas
+Raspberry Pi (cámara IMX500)
+  └── contador_cruce_imx500_trained.py
+        ├── YOLO11n — detección de personas
         ├── Lógica de cruce de línea — conteo entrada/salida
-        ├── WebSocket server (puerto 8765) ──────────────────────┐
-        └── Parquet horario + modelo ML peak/off-peak            │
-                                                                  ↓
+        ├── Parquet horario + modelo ML peak/off-peak
+        └── WebSocket client ──────────────────────────────┐
+                                                           ↓
+                                          Relay Server (Render)
+                                          relay/server.js
+                                          wss://autocount-relay.onrender.com
+                                                           │
+                                                           ↓
                                               Browser (Vercel)
                                               src/app/pages/Dashboard.tsx
                                               src/app/pages/AdminPanel.tsx
                                               src/app/hooks/useCounterWebSocket.ts
 ```
+
+**Por qué relay:** La red del campus bloquea conexiones entrantes, por lo que la Pi no puede exponer un servidor. En cambio, la Pi se conecta como *cliente* al relay en Render (salida permitida), y el frontend también se conecta al mismo relay. El relay reenvía mensajes en ambas direcciones. La URL del relay es permanente — no cambia nunca.
 
 ---
 
@@ -44,14 +51,38 @@ Raspberry Pi (cámara IMX500 o webcam)
 
 ### Raspberry Pi
 - Raspberry Pi 4 / 5 con Raspberry Pi OS (64-bit recomendado)
-- Cámara IMX500 **o** webcam USB
+- Cámara IMX500
 - Python 3.10+
-- Conexión a internet para el túnel
+- Virtualenv `yolo-env` con dependencias instaladas
 
 ### Máquina de desarrollo
 - Node.js 18+
 - npm 9+
 - Git
+
+---
+
+## Relay Server — Render
+
+El relay es un servidor Node.js desplegado en [render.com](https://render.com) (plan gratuito). Ya está desplegado en `wss://autocount-relay.onrender.com`.
+
+### Desplegar tu propio relay (opcional)
+
+1. Crea una cuenta en [render.com](https://render.com)
+2. **New → Web Service** → conecta el repositorio `carlovivanco/autocount`
+3. Configura:
+   - **Root Directory:** `relay`
+   - **Build Command:** `npm install`
+   - **Start Command:** `npm start`
+4. Agrega variables de entorno:
+
+   | Variable | Descripción |
+   |---|---|
+   | `PI_TOKEN` | Token secreto compartido con la Pi (ej. `autocount-pi-secret`) |
+
+5. Despliega — Render te da una URL permanente del tipo `https://tu-relay.onrender.com`
+
+> **Nota:** El plan gratuito de Render "hiberna" servicios sin tráfico. La conexión persistente de la Pi evita que el relay hiberne mientras esté encendida.
 
 ---
 
@@ -67,26 +98,24 @@ cd autocount
 ### 2. Instalar dependencias Python
 
 ```bash
+python3 -m venv yolo-env
+source yolo-env/bin/activate
 pip install websockets pandas pyarrow scikit-learn joblib openpyxl ultralytics
 # picamera2 ya viene preinstalado en Raspberry Pi OS
 ```
 
-### 3. Elegir y correr el script según tu cámara
+### 3. Correr el script manualmente
 
-**Con cámara IMX500 (aceleración por hardware):**
 ```bash
-python contador_cruce_imx500.py
+source yolo-env/bin/activate
+RELAY_URL=wss://autocount-relay.onrender.com \
+PI_TOKEN=autocount-pi-secret \
+python3 contador_cruce_imx500_trained.py
 ```
 
-**Con webcam USB o cámara estándar del Pi (usa YOLO26n):**
-```bash
-python contador_cruce.py
+La consola mostrará:
 ```
-
-Ambos scripts inician el servidor WebSocket en `ws://0.0.0.0:8765` y muestran en consola:
-```
-WebSocket escuchando en ws://0.0.0.0:8765
-Presiona q para salir
+[Relay] Conectado a wss://autocount-relay.onrender.com
 ```
 
 ### 4. Controles en pantalla
@@ -104,8 +133,8 @@ npm install
 
 # Crear archivo de entorno local
 cp .env.example .env.local
-# Editar .env.local con la URL de tu Pi local:
-# VITE_WS_URL=ws://raspberrypi.local:8765
+# Editar .env.local:
+# VITE_WS_URL=wss://autocount-relay.onrender.com
 
 # Iniciar servidor de desarrollo
 npm run dev
@@ -130,107 +159,51 @@ En **Settings → Environment Variables** agrega:
 
 | Variable | Valor | Descripción |
 |---|---|---|
-| `VITE_WS_URL` | `wss://tu-tunnel.trycloudflare.com` | URL del túnel Cloudflare (ver sección siguiente) |
+| `VITE_WS_URL` | `wss://autocount-relay.onrender.com` | URL del relay (permanente, no cambia) |
 | `VITE_ADMIN_USER` | `tu_usuario` | Usuario del panel admin |
 | `VITE_ADMIN_PASSWORD` | `tu_contraseña` | Contraseña del panel admin |
 
 ### 3. Redeplegar
-Después de agregar las variables ve a **Deployments → Redeploy** para que el build las incluya.
+Después de agregar las variables ve a **Deployments → Redeploy**.
 
 ---
 
-## Exponer el Pi a internet (Cloudflare Tunnel)
+## Arranque automático (plug-and-play)
 
-El frontend en Vercel (HTTPS) requiere `wss://` — no puede conectarse a `ws://` directamente. Cloudflare Tunnel resuelve esto de forma gratuita.
+El script `pi-setup/setup.sh` configura un servicio systemd para que el contador arranque solo al encender la Pi y se reconecte automáticamente si pierde la red.
 
 ### Instalación (una sola vez)
 
 ```bash
-curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64 \
-  -o cloudflared
-chmod +x cloudflared
-sudo mv cloudflared /usr/local/bin/
+bash pi-setup/setup.sh <RELAY_URL> <PI_TOKEN>
 ```
 
-### Uso básico (URL temporal, cambia al reiniciar)
+**Ejemplo:**
+```bash
+bash pi-setup/setup.sh wss://autocount-relay.onrender.com autocount-pi-secret
+```
+
+El script:
+1. Crea `/etc/systemd/system/autocount.service`
+2. Habilita el servicio para que inicie al encender
+3. Lo inicia inmediatamente
+
+### Comandos útiles
 
 ```bash
-cloudflared tunnel --url ws://localhost:8765
-# Imprime algo como: https://algo-random.trycloudflare.com
-# Copia esa URL y úsala en Vercel como wss://algo-random.trycloudflare.com
+sudo systemctl status autocount        # Ver estado
+sudo journalctl -u autocount -f        # Ver logs en vivo
+sudo systemctl restart autocount       # Reiniciar manualmente
+sudo systemctl stop autocount          # Detener
 ```
 
-### URL fija (requiere dominio propio)
+### Flujo tras un reinicio de la Pi
 
-```bash
-# Autenticarse con tu cuenta de Cloudflare
-cloudflared login
-
-# Crear túnel con nombre permanente
-cloudflared tunnel create gym-tec
-
-# Configurar (~/.cloudflared/config.yml)
-cat > ~/.cloudflared/config.yml << EOF
-tunnel: gym-tec
-credentials-file: /home/pi/.cloudflared/<UUID>.json
-ingress:
-  - service: ws://localhost:8765
-EOF
-
-# Asignar subdominio (necesitas un dominio en Cloudflare)
-cloudflared tunnel route dns gym-tec gym-tec.tudominio.com
-```
-
----
-
-## Arranque automático
-
-Para que el Pi inicie todo solo al encenderse y se recupere automáticamente si algo falla:
-
-### 1. Configurar el script de arranque
-
-Edita `scripts/arrancar.sh` y rellena las 4 variables al inicio del archivo:
-
-```bash
-VERCEL_TOKEN="..."       # vercel.com/account/tokens → Create Token
-PROJECT_ID="..."         # vercel.com/<proyecto>/settings → Project ID
-ENV_VAR_ID="..."         # Ver instrucción abajo
-DEPLOY_HOOK="..."        # vercel.com/<proyecto>/settings/git → Deploy Hooks
-```
-
-**Para obtener `ENV_VAR_ID`:**
-```bash
-curl -H "Authorization: Bearer <TU_TOKEN>" \
-  "https://api.vercel.com/v9/projects/<PROJECT_ID>/env" | python3 -m json.tool \
-  | grep -A2 "VITE_WS_URL"
-# Copia el valor del campo "id"
-```
-
-### 2. Instalar el servicio systemd
-
-```bash
-chmod +x scripts/arrancar.sh
-sudo cp scripts/gym-tec.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable gym-tec
-sudo systemctl start gym-tec
-```
-
-### 3. Comandos útiles
-
-```bash
-sudo systemctl status gym-tec        # Ver estado
-sudo journalctl -u gym-tec -f        # Ver logs en vivo
-sudo systemctl restart gym-tec       # Reiniciar manualmente
-sudo systemctl stop gym-tec          # Detener
-```
-
-### Qué hace automáticamente
-1. Inicia Cloudflare Tunnel y captura la nueva URL
-2. Actualiza `VITE_WS_URL` en Vercel vía API
-3. Dispara un redeploy de Vercel (~1 min)
-4. Arranca el backend Python
-5. Si algo falla, systemd reinicia todo en 15 segundos
+1. Pi enciende → systemd inicia `autocount.service`
+2. Script se conecta como cliente WebSocket al relay en Render
+3. Envía estado inicial (`count`, `peak_prediction`, `peak_schedule`, `today_events`)
+4. Relay notifica a todos los frontends que la Pi está conectada
+5. Dashboard actualiza el contador y muestra el indicador "● Raspberry Pi conectada"
 
 ---
 
@@ -241,7 +214,7 @@ Accede en: `https://tu-app.vercel.app/admin`
 | Función | Descripción |
 |---|---|
 | **Login** | Usuario y contraseña configurados en Vercel (`VITE_ADMIN_USER` / `VITE_ADMIN_PASSWORD`) |
-| **+1 Entrada** | Suma 1 al contador manualmente (si la cámara no detectó) |
+| **+1 Entrada** | Suma 1 al contador manualmente |
 | **−1 Salida** | Resta 1 al contador manualmente |
 | **Descargar Excel** | Descarga el historial horario en `.xlsx` con columna de predicción peak/off-peak |
 
@@ -251,7 +224,7 @@ La sesión se mantiene mientras el tab esté abierto y se cierra al cerrar el na
 
 ## Entrenamiento del modelo YOLO
 
-Si quieres afinar el modelo para mejorar la detección en las condiciones específicas del gym (iluminación, ángulo de cámara):
+Si quieres afinar el modelo para mejorar la detección en las condiciones del gym:
 
 ### 1. Etiquetar fotos con Roboflow
 
@@ -272,39 +245,56 @@ dataset/
 └── data.yaml
 ```
 
-### 3. Entrenar
+### 3. Entrenar (en laptop/PC, no en la Pi)
 
 ```bash
-# Instalar dependencia adicional
 pip install ultralytics
-
-# Correr fine-tuning (en tu laptop/PC, no en el Pi)
 python train.py
 ```
 
-El mejor modelo se guarda en `runs/gym_tec/yolo26n_finetuned/weights/best.pt`.
+El mejor modelo se guarda en `runs/gym_tec_yolo11n/yolo11n_finetuned/weights/best.pt`.
 
-### 4. Usar el modelo afinado
-
-En `contador_cruce.py` cambia:
-```python
-MODEL_PATH = "runs/gym_tec/yolo26n_finetuned/weights/best.pt"
-```
-
-### Detección pura sin contador (para pruebas)
+### 4. Empaquetar para IMX500 (en la Pi)
 
 ```bash
-python detectar_personas.py
-# Muestra bounding boxes y porcentaje de confianza sin ningún otro proceso
+imx500-package best_imx_model/packerOut.zip
+# genera network.rpk
 ```
+
+Actualiza la constante `MODEL` en `contador_cruce_imx500_trained.py` con la ruta al `.rpk`.
 
 ---
 
 ## Datos y modelo ML de peak hours
 
+### Cómo funciona
+
+El script registra automáticamente el promedio de personas por hora en `conteo_horario.parquet`. Cada 30 días (o manualmente) se reentrena un RandomForestClassifier que predice si cada hora de cada día es "Peak" u "Off-peak".
+
+Los horarios predichos aparecen en el dashboard bajo **"Horarios Peak · Predicción IA"**.
+
+### Entrenar manualmente
+
+```bash
+cd /ruta/a/autocount
+python3 - <<'EOF'
+import pandas as pd, joblib, numpy as np
+from sklearn.ensemble import RandomForestClassifier
+
+df = pd.read_parquet("conteo_horario.parquet")
+threshold = df["promedio_personas"].quantile(0.70)
+df["es_peak"] = (df["promedio_personas"] >= threshold).astype(int)
+clf = RandomForestClassifier(n_estimators=100, random_state=42)
+clf.fit(df[["hora", "dia_semana"]], df["es_peak"])
+joblib.dump(clf, "peak_model.joblib")
+print(f"Modelo entrenado. Umbral peak: {threshold:.1f} personas/hora")
+EOF
+sudo systemctl restart autocount
+```
+
 ### Formato del archivo Parquet
 
-`conteo_horario.parquet` — se genera automáticamente, una fila por hora completada:
+`conteo_horario.parquet` — una fila por hora completada:
 
 | Campo | Tipo | Descripción |
 |---|---|---|
@@ -322,40 +312,31 @@ python detectar_personas.py
 - **Reentrenamiento:** automático cada 30 días si hay ≥ 24 muestras
 - **Modelo guardado en:** `peak_model.joblib`
 
-### Excel exportado desde el admin
-
-El archivo descargado incluye todas las columnas del Parquet más:
-
-| Campo | Descripción |
-|---|---|
-| `prediccion` | "Peak" u "Off-peak" según el modelo ML |
-
 ---
 
 ## Variables de entorno
 
-### Frontend (Vercel)
+### Frontend (Vercel / `.env.local`)
 
 | Variable | Ejemplo | Descripción |
 |---|---|---|
-| `VITE_WS_URL` | `wss://abc.trycloudflare.com` | URL WebSocket del Pi |
+| `VITE_WS_URL` | `wss://autocount-relay.onrender.com` | URL del relay WebSocket |
 | `VITE_ADMIN_USER` | `admin` | Usuario del panel admin |
 | `VITE_ADMIN_PASSWORD` | `clave_segura` | Contraseña del panel admin |
 
-Crea `.env.local` para desarrollo local (nunca lo subas al repo):
-```bash
-cp .env.example .env.local
-```
+### Backend (Pi) — variables de entorno del servicio systemd
 
-### Backend (Pi) — configurables al inicio de cada script
-
-| Constante | Default | Descripción |
+| Variable | Default | Descripción |
 |---|---|---|
-| `LINE_X` | `320` | Posición de la línea de conteo (px) |
-| `CONFIDENCE` | `0.4` | Confianza mínima YOLO |
-| `WS_PORT` | `8765` | Puerto WebSocket |
-| `SAMPLE_INTERVAL` | `60` | Segundos entre muestras horarias |
-| `RETRAIN_DAYS` | `30` | Días entre reentrenamientos del modelo ML |
+| `RELAY_URL` | `wss://autocount-relay.onrender.com` | URL del relay |
+| `PI_TOKEN` | `autocount-pi-secret` | Token de autenticación con el relay |
+
+### Relay (Render)
+
+| Variable | Descripción |
+|---|---|
+| `PI_TOKEN` | Debe coincidir con el token configurado en la Pi |
+| `PORT` | Puerto (Render lo asigna automáticamente) |
 
 ---
 
@@ -363,12 +344,10 @@ cp .env.example .env.local
 
 | Script | Descripción |
 |---|---|
-| `contador_cruce.py` | Backend principal — YOLO26n + webcam/cámara Pi |
-| `contador_cruce_imx500.py` | Backend alternativo — MobileNetV2 + cámara IMX500 |
-| `detectar_personas.py` | Detección pura sin contador (pruebas) |
-| `train.py` | Fine-tuning de YOLO26n con fotos del gym |
-| `scripts/arrancar.sh` | Arranque automático + actualización de Vercel |
-| `scripts/gym-tec.service` | Servicio systemd para el Pi |
+| `contador_cruce_imx500_trained.py` | Backend principal — YOLO11n + IMX500, cliente WebSocket del relay |
+| `train.py` | Fine-tuning de YOLO11n con fotos del gym |
+| `pi-setup/setup.sh` | Instala y configura el servicio systemd en la Pi |
+| `relay/server.js` | Relay WebSocket desplegado en Render |
 
 ---
 
