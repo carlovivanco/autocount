@@ -330,6 +330,8 @@ def _record_sample():
         tracks.clear()
         _hourly_samples.clear()
         _last_date = current_date
+        global next_id
+        next_id = 0
         _save_counter_state()
         print(f"[Reset] Medianoche — contador reiniciado")
         if ws_loop and ws_loop.is_running():
@@ -440,16 +442,22 @@ def actualizar_tracks(detections):
 
     for tid, tr in tracks.items():
         px, cx = tr["prev_cx"], tr["cx"]
+        side = "right" if cx >= LINE_X else "left"
+
+        # Reset counted when the person is clearly back on the opposite side
+        if tr["counted"] and side != tr.get("counted_side"):
+            tr["counted"] = False
+
         if not tr["counted"] and px < LINE_X <= cx:
             contador += 1
             tr["counted"] = True
+            tr["counted_side"] = "right"
             _log_event("entrada")
         elif not tr["counted"] and px > LINE_X >= cx and contador > 0:
             contador -= 1
             tr["counted"] = True
+            tr["counted_side"] = "left"
             _log_event("salida")
-        if abs(cx - LINE_X) > 100:
-            tr["counted"] = False
 
 
 def draw_overlay(request, stream="main"):
