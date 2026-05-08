@@ -1,5 +1,5 @@
 import { Activity, TrendingUp, TrendingDown } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 interface CounterProps {
   count: number;
@@ -7,15 +7,15 @@ interface CounterProps {
 }
 
 export function Counter({ count, maxCapacity }: CounterProps) {
-  const [previousCount, setPreviousCount] = useState(count);
+  const previousCountRef = useRef(count);
   const [trend, setTrend] = useState<'up' | 'down' | 'stable'>('stable');
 
   useEffect(() => {
-    if (count > previousCount) setTrend('up');
-    else if (count < previousCount) setTrend('down');
+    if (count > previousCountRef.current) setTrend('up');
+    else if (count < previousCountRef.current) setTrend('down');
     else setTrend('stable');
-    setPreviousCount(count);
-  }, [count, previousCount]);
+    previousCountRef.current = count;
+  }, [count]);
 
   const percentage = (count / maxCapacity) * 100;
   const availableSpots = Math.max(0, maxCapacity - count);

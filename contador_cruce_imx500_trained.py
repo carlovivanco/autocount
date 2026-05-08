@@ -233,7 +233,8 @@ async def _ws_client_loop():
                             _save_counter_state()
                             await _broadcast(contador)
                         elif cmd == "decrement":
-                            contador -= 1
+                            if contador > 0:
+                                contador -= 1
                             _log_event("salida")
                             _save_counter_state()
                             await _broadcast(contador)
@@ -318,7 +319,7 @@ def _train_model():
 
 
 def _record_sample():
-    global _last_sample_time, _last_hour, _hourly_samples, contador, _last_date
+    global _last_sample_time, _last_hour, _hourly_samples, contador, _last_date, next_id
 
     now_ts = time.time()
     now_dt = datetime.fromtimestamp(now_ts)
@@ -330,7 +331,6 @@ def _record_sample():
         tracks.clear()
         _hourly_samples.clear()
         _last_date = current_date
-        global next_id
         next_id = 0
         _save_counter_state()
         print(f"[Reset] Medianoche — contador reiniciado")

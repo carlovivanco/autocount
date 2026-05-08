@@ -9,7 +9,7 @@ export function TrafficLight({ percentage, currentCount, maxCapacity }: TrafficL
     if (percentage < 66.7) return 'green';
     if (percentage < 100) return 'yellow';
     if (percentage <= 100) return 'red';
-    return 'critical';
+    return 'critical'; // percentage > 100
   };
 
   const status = getStatus();

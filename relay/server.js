@@ -13,10 +13,11 @@ function mergeState(incoming) {
   if (!lastPiState) { lastPiState = incoming; return; }
   const state   = JSON.parse(lastPiState);
   const parsed  = JSON.parse(incoming);
-  if (parsed.count          !== undefined) state.count          = parsed.count;
+  if (parsed.count           !== undefined) state.count           = parsed.count;
   if (parsed.peak_prediction !== undefined) state.peak_prediction = parsed.peak_prediction;
-  if (parsed.today_events   !== undefined) state.today_events   = parsed.today_events;
-  if (parsed.midnight_reset)               state.today_events   = [];
+  if (parsed.today_events    !== undefined) state.today_events    = parsed.today_events;
+  if (parsed.peak_schedule   !== undefined) state.peak_schedule   = parsed.peak_schedule;
+  if (parsed.midnight_reset)               state.today_events    = [];
   lastPiState = JSON.stringify(state);
 }
 

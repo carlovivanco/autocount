@@ -136,7 +136,7 @@ export function DailyLog() {
             <div className="flex justify-between items-center">
               <span className="text-white/50 text-sm">Tasa de ocupación</span>
               <span className="text-white font-semibold text-sm">
-                {totalEntries > 0 ? Math.round((netFlow / 40) * 100) : 0}%
+                {totalEntries > 0 ? Math.round((netFlow / 60) * 100) : 0}%
               </span>
             </div>
             <div className="w-full h-px bg-white/10" />
