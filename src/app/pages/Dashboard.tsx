@@ -1,33 +1,32 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { PeakScheduleCard } from '../components/PeakSchedule';
 import { AlertTriangle, Clock, Activity, TrendingUp, TrendingDown } from 'lucide-react';
 import { useCounterWebSocket } from '../hooks/useCounterWebSocket';
 
-const MAX_CAPACITY = 60;
+const MAX_CAPACITY = 60;  // official capacity shown in UI
+const HARD_MAX     = 80;  // absolute max before alert triggers
 
 // Gauge geometry — 270° arc, gap at the bottom
 const R     = 80;
 const CIRC  = 2 * Math.PI * R;  // ≈ 502.65
 const ARC   = CIRC * 0.75;      // ≈ 376.99  (270° of circumference)
 
-function gaugeColor(pct: number) {
-  if (pct <= 66.7) return '#22c55e';
-  if (pct < 100)   return '#f59e0b';
-  return '#ef4444';
+function gaugeColor(count: number) {
+  if (count < 40)           return '#22c55e';  // green:  0–39
+  if (count < MAX_CAPACITY) return '#f59e0b';  // yellow: 40–59
+  return '#ef4444';                             // red:    60+
 }
 
-function gaugeGlow(pct: number) {
-  if (pct <= 66.7) return 'rgba(34,197,94,0.45)';
-  if (pct < 100)   return 'rgba(245,158,11,0.45)';
+function gaugeGlow(count: number) {
+  if (count < 40)           return 'rgba(34,197,94,0.45)';
+  if (count < MAX_CAPACITY) return 'rgba(245,158,11,0.45)';
   return 'rgba(239,68,68,0.45)';
 }
 
-function gaugeStatus(pct: number): { label: string; sub: string } {
-  if (pct < 66.7) return { label: 'Espacio disponible',   sub: 'Puedes ingresar sin problema' };
-  if (pct < 85)   return { label: 'Llenándose',            sub: 'El gimnasio se está llenando' };
-  if (pct < 100)  return { label: 'Casi lleno',            sub: 'Espacio limitado disponible' };
-  if (pct <= 100) return { label: 'Capacidad máxima',      sub: 'Considera regresar más tarde' };
-  return                  { label: '¡Capacidad excedida!', sub: 'Notifica al personal del gimnasio' };
+function gaugeStatus(count: number): { label: string; sub: string } {
+  if (count < 40)           return { label: 'Espacio disponible',   sub: 'Puedes ingresar sin problema' };
+  if (count < MAX_CAPACITY) return { label: 'Llenándose',           sub: 'El gimnasio se está llenando' };
+  if (count < HARD_MAX)     return { label: 'Capacidad máxima',     sub: 'Considera regresar más tarde' };
+  return                           { label: '¡Capacidad excedida!', sub: 'Notifica al personal del gimnasio' };
 }
 
 export function Dashboard() {
@@ -36,7 +35,7 @@ export function Dashboard() {
   const prevCountRef  = useRef(0);
   const trendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { count: wsCount, connected: wsConnected, peakPrediction, peakSchedule } =
+  const { count: wsCount, connected: wsConnected, peakPrediction } =
     useCounterWebSocket(useCallback(() => {}, []));
 
   useEffect(() => {
@@ -52,13 +51,14 @@ export function Dashboard() {
 
   useEffect(() => () => { if (trendTimerRef.current) clearTimeout(trendTimerRef.current); }, []);
 
-  const pct        = (currentCount / MAX_CAPACITY) * 100;
-  const color      = gaugeColor(pct);
-  const glow       = gaugeGlow(pct);
-  const status     = gaugeStatus(pct);
-  const available  = Math.max(0, MAX_CAPACITY - currentCount);
-  const over       = pct > 100;
-  const fillOffset = ARC * Math.max(0, 1 - Math.min(pct / 100, 1));
+  const pct           = (currentCount / MAX_CAPACITY) * 100;
+  const color         = gaugeColor(currentCount);
+  const glow          = gaugeGlow(currentCount);
+  const status        = gaugeStatus(currentCount);
+  const overCapacity  = currentCount >= MAX_CAPACITY;   // 60+ → red stat card
+  const hardExceeded  = currentCount >= HARD_MAX;       // 80+ → alert banner
+  const available     = Math.max(0, MAX_CAPACITY - currentCount);
+  const fillOffset    = ARC * Math.max(0, 1 - Math.min(pct / 100, 1));
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-5xl">
@@ -97,8 +97,8 @@ export function Dashboard() {
         </div>
       </div>
 
-      {/* ── Alert Banner ───────────────────────────── */}
-      {over && (
+      {/* ── Alert Banner — only at hard limit (80+) ── */}
+      {hardExceeded && (
         <div className="mb-6 rounded-2xl border border-red-400/40 bg-red-500/10 p-4">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 flex-shrink-0 rounded-xl bg-red-500/20 flex items-center justify-center">
@@ -213,12 +213,12 @@ export function Dashboard() {
               </div>
               <div className="rounded-2xl bg-white/[0.04] border border-white/[0.07] p-4">
                 <p className="text-white/40 text-xs uppercase tracking-wider mb-2">
-                  {over ? 'Exceso' : 'Libres'}
+                  {overCapacity ? 'Exceso' : 'Libres'}
                 </p>
                 <p className={`text-2xl font-black tabular-nums leading-none ${
-                  over ? 'text-red-400' : 'text-emerald-400'
+                  overCapacity ? 'text-red-400' : 'text-emerald-400'
                 }`}>
-                  {over ? `+${currentCount - MAX_CAPACITY}` : available}
+                  {overCapacity ? `+${currentCount - MAX_CAPACITY}` : available}
                 </p>
               </div>
               <div className="rounded-2xl bg-white/[0.04] border border-white/[0.07] p-4">
@@ -243,13 +243,6 @@ export function Dashboard() {
           </div>
         </div>
       </div>
-
-      {/* ── Peak Schedule ──────────────────────────── */}
-      {peakSchedule && (
-        <div className="bg-white/[0.05] backdrop-blur-md rounded-3xl border border-white/10 p-6 mb-6">
-          <PeakScheduleCard schedule={peakSchedule} />
-        </div>
-      )}
 
       {/* ── Info Row ───────────────────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">

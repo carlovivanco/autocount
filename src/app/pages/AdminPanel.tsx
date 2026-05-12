@@ -5,6 +5,7 @@ import {
   Wifi, WifiOff, ArrowDownCircle, ArrowUpCircle, Calendar, TrendingUp,
 } from 'lucide-react';
 import { useCounterWebSocket } from '../hooks/useCounterWebSocket';
+import { PeakScheduleCard } from '../components/PeakSchedule';
 
 const ADMIN_USER = (import.meta.env.VITE_ADMIN_USER as string | undefined) ?? 'admin';
 const ADMIN_PASS = (import.meta.env.VITE_ADMIN_PASSWORD as string | undefined) ?? 'admin';
@@ -137,7 +138,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     setTotalExits(_log.totalExits);
   }, []);
 
-  const { count, connected, sendCommand, todayEvents } = useCounterWebSocket(handleDelta);
+  const { count, connected, sendCommand, todayEvents, peakSchedule } = useCounterWebSocket(handleDelta);
 
   // Initialize log from backend's authoritative day events on connect / midnight reset
   useEffect(() => {
@@ -243,7 +244,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       </div>
 
       {/* Export */}
-      <div className="bg-white/8 backdrop-blur-md rounded-2xl border border-white/15 p-6 mb-10">
+      <div className="bg-white/8 backdrop-blur-md rounded-2xl border border-white/15 p-6 mb-6">
         <h2 className="text-white font-semibold mb-1">Exportar Datos</h2>
         <p className="text-white/40 text-xs mb-5">
           Descarga el historial horario con predicciones de peak / off-peak en formato Excel.
@@ -257,6 +258,13 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           {downloading ? 'Generando archivo...' : 'Descargar Excel'}
         </button>
       </div>
+
+      {/* Peak Schedule */}
+      {peakSchedule && (
+        <div className="bg-white/8 backdrop-blur-md rounded-2xl border border-white/15 p-6 mb-6">
+          <PeakScheduleCard schedule={peakSchedule} />
+        </div>
+      )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
