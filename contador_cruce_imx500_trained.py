@@ -441,23 +441,20 @@ def actualizar_tracks(detections):
                 del tracks[tid]
 
     for tid, tr in tracks.items():
-        px, cx = tr["prev_cx"], tr["cx"]
-        side = "right" if cx >= LINE_X else "left"
-
-        # Reset counted when the person is clearly back on the opposite side
-        if tr["counted"] and side != tr.get("counted_side"):
+        px = tr["prev_cx"]
+        x1, x2 = tr["x1"], tr["x2"]
+        intersects = x1 <= LINE_X <= x2
+        if intersects and not tr["counted"]:
+            if px < LINE_X:
+                contador += 1
+                tr["counted"] = True
+                _log_event("entrada")
+            elif px > LINE_X and contador > 0:
+                contador -= 1
+                tr["counted"] = True
+                _log_event("salida")
+        if not intersects:
             tr["counted"] = False
-
-        if not tr["counted"] and px < LINE_X <= cx:
-            contador += 1
-            tr["counted"] = True
-            tr["counted_side"] = "right"
-            _log_event("entrada")
-        elif not tr["counted"] and px > LINE_X >= cx and contador > 0:
-            contador -= 1
-            tr["counted"] = True
-            tr["counted_side"] = "left"
-            _log_event("salida")
 
 
 def draw_overlay(request, stream="main"):
