@@ -22,7 +22,6 @@ from ultralytics import YOLO
 MODEL_PATH       = "yolo26n.pt"
 CONFIDENCE       = 0.4
 LINE_X           = 320
-LINE_RESET_DIST  = 100
 FRAME_W, FRAME_H = 640, 480
 
 WS_PORT          = 8765
@@ -385,18 +384,20 @@ try:
                 cv2.putText(frame, f"ID {tid}", (x1, max(20, y1 - 8)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
+                intersects = x1 <= LINE_X <= x2
                 if tid in prev_cx:
                     px = prev_cx[tid]
                     already = crossed.get(tid, False)
-                    if not already and px < LINE_X <= cx:
-                        contador -= 1
-                        crossed[tid] = True
-                        _log_event("salida")
-                    elif not already and px > LINE_X >= cx:
-                        contador += 1
-                        crossed[tid] = True
-                        _log_event("entrada")
-                    if abs(cx - LINE_X) > LINE_RESET_DIST:
+                    if intersects and not already:
+                        if px < LINE_X:
+                            contador -= 1
+                            crossed[tid] = True
+                            _log_event("salida")
+                        elif px > LINE_X:
+                            contador += 1
+                            crossed[tid] = True
+                            _log_event("entrada")
+                    if not intersects:
                         crossed[tid] = False
                 prev_cx[tid] = cx
 
