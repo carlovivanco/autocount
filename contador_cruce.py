@@ -58,8 +58,7 @@ def _save_counter_state():
 # Estado global
 # -------------------------------------------------
 contador = _load_counter_state()
-prev_x1: dict[int, int] = {}
-prev_x2: dict[int, int] = {}
+prev_cx: dict[int, int] = {}
 crossed: dict[int, bool] = {}
 _last_date: str = datetime.now().strftime("%Y-%m-%d")
 
@@ -301,8 +300,7 @@ def _record_sample():
 
     if current_date != _last_date:
         contador = 0
-        prev_x1.clear()
-        prev_x2.clear()
+        prev_cx.clear()
         crossed.clear()
         _hourly_samples.clear()
         _last_date = current_date
@@ -386,30 +384,30 @@ try:
                 cv2.putText(frame, f"ID {tid}", (x1, max(20, y1 - 8)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-                if tid in prev_x1:
-                    px1, px2 = prev_x1[tid], prev_x2[tid]
+                intersects = x1 <= LINE_X <= x2
+                if tid in prev_cx:
+                    px = prev_cx[tid]
                     already = crossed.get(tid, False)
-                    if x1 > LINE_X and not already and px1 <= LINE_X:
-                        contador -= 1
-                        crossed[tid] = True
-                        _log_event("salida")
-                    elif x2 < LINE_X and not already and px2 >= LINE_X:
-                        contador += 1
-                        crossed[tid] = True
-                        _log_event("entrada")
-                    if x1 <= LINE_X <= x2:
+                    if intersects and not already:
+                        if px < LINE_X:
+                            contador -= 1
+                            crossed[tid] = True
+                            _log_event("salida")
+                        elif px > LINE_X:
+                            contador += 1
+                            crossed[tid] = True
+                            _log_event("entrada")
+                    if not intersects:
                         crossed[tid] = False
-                prev_x1[tid] = x1
-                prev_x2[tid] = x2
+                prev_cx[tid] = cx
 
         active_ids = (
             set(results[0].boxes.id.cpu().numpy().astype(int))
             if results[0].boxes.id is not None else set()
         )
-        for tid in list(prev_x1):
+        for tid in list(prev_cx):
             if tid not in active_ids:
-                del prev_x1[tid]
-                del prev_x2[tid]
+                del prev_cx[tid]
                 crossed.pop(tid, None)
 
         cv2.line(frame, (LINE_X, 0), (LINE_X, FRAME_H), (0, 0, 255), 2)

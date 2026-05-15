@@ -397,14 +397,12 @@ def actualizar_tracks(detections):
         if mejor_id is not None:
             tr = tracks[mejor_id]
             tr["prev_cx"] = tr["cx"]
-            tr["prev_x1"] = tr["x1"]
-            tr["prev_x2"] = tr["x2"]
             tr.update({k: det[k] for k in det})
             tr["cx"] = det["cx"]
             tr["misses"] = 0
             usados.add(mejor_id)
         else:
-            tracks[next_id] = {**det, "prev_cx": det["cx"], "prev_x1": det["x1"], "prev_x2": det["x2"], "misses": 0, "counted": False}
+            tracks[next_id] = {**det, "prev_cx": det["cx"], "misses": 0, "counted": False}
             usados.add(next_id)
             next_id += 1
 
@@ -415,18 +413,19 @@ def actualizar_tracks(detections):
                 del tracks[tid]
 
     for tid, tr in tracks.items():
+        px = tr["prev_cx"]
         x1, x2 = tr["x1"], tr["x2"]
-        px1 = tr.get("prev_x1", x1)
-        px2 = tr.get("prev_x2", x2)
-        if x1 > LINE_X and not tr["counted"] and px1 <= LINE_X:
-            contador += 1
-            tr["counted"] = True
-            _log_event("entrada")
-        elif x2 < LINE_X and not tr["counted"] and px2 >= LINE_X and contador > 0:
-            contador -= 1
-            tr["counted"] = True
-            _log_event("salida")
-        if x1 <= LINE_X <= x2:
+        intersects = x1 <= LINE_X <= x2
+        if intersects and not tr["counted"]:
+            if px < LINE_X:
+                contador += 1
+                tr["counted"] = True
+                _log_event("entrada")
+            elif px > LINE_X and contador > 0:
+                contador -= 1
+                tr["counted"] = True
+                _log_event("salida")
+        if not intersects:
             tr["counted"] = False
 
 
