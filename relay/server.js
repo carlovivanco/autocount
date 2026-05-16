@@ -34,8 +34,23 @@ wss.on('connection', (ws, req) => {
     // ── Pi ─────────────────────────────────────────
     if (piSocket) piSocket.terminate();
     piSocket = ws;
+    ws.isAlive = true;
     console.log('[Pi] Conectada');
     broadcast(JSON.stringify({ pi_connected: true }));
+
+    ws.on('pong', () => { ws.isAlive = true; });
+
+    const heartbeat = setInterval(() => {
+      if (piSocket !== ws) { clearInterval(heartbeat); return; }
+      if (!ws.isAlive) {
+        console.log('[Pi] Heartbeat timeout — terminando conexión');
+        clearInterval(heartbeat);
+        ws.terminate();
+        return;
+      }
+      ws.isAlive = false;
+      ws.ping();
+    }, 15_000);
 
     ws.on('message', (data) => {
       const str = data.toString();
@@ -47,6 +62,7 @@ wss.on('connection', (ws, req) => {
     });
 
     ws.on('close', () => {
+      clearInterval(heartbeat);
       if (piSocket === ws) piSocket = null;
       console.log('[Pi] Desconectada');
       broadcast(JSON.stringify({ pi_connected: false }));
