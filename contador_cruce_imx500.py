@@ -402,7 +402,7 @@ def actualizar_tracks(detections):
             tr["misses"] = 0
             usados.add(mejor_id)
         else:
-            tracks[next_id] = {**det, "prev_cx": det["cx"], "misses": 0, "counted": False}
+            tracks[next_id] = {**det, "prev_cx": None, "misses": 0, "counted": False}
             usados.add(next_id)
             next_id += 1
 
@@ -413,6 +413,8 @@ def actualizar_tracks(detections):
                 del tracks[tid]
 
     for tid, tr in tracks.items():
+        if tr["prev_cx"] is None:
+            continue
         px = tr["prev_cx"]
         x1, x2 = tr["x1"], tr["x2"]
         intersects = x1 <= LINE_X <= x2
