@@ -453,7 +453,7 @@ def actualizar_tracks(detections):
                 contador -= 1
                 tr["counted"] = True
                 _log_event("salida")
-        if not intersects:
+        if not intersects and abs(tr["cx"] - LINE_X) > 80:
             tr["counted"] = False
 
 

@@ -397,7 +397,7 @@ try:
                             contador += 1
                             crossed[tid] = True
                             _log_event("entrada")
-                    if not intersects:
+                    if not intersects and abs(cx - LINE_X) > 80:
                         crossed[tid] = False
                 prev_cx[tid] = cx
 
