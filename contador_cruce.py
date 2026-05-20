@@ -22,6 +22,7 @@ from ultralytics import YOLO
 MODEL_PATH       = "yolo26n.pt"
 CONFIDENCE       = 0.4
 LINE_X           = 320
+DEAD_ZONE        = 30
 FRAME_W, FRAME_H = 640, 480
 
 WS_PORT          = 8765
@@ -58,8 +59,7 @@ def _save_counter_state():
 # Estado global
 # -------------------------------------------------
 contador = _load_counter_state()
-prev_cx: dict[int, int] = {}
-crossed: dict[int, bool] = {}
+sides: dict[int, str] = {}
 _last_date: str = datetime.now().strftime("%Y-%m-%d")
 
 # -------------------------------------------------
@@ -300,8 +300,7 @@ def _record_sample():
 
     if current_date != _last_date:
         contador = 0
-        prev_cx.clear()
-        crossed.clear()
+        sides.clear()
         _hourly_samples.clear()
         _last_date = current_date
         _save_counter_state()
@@ -384,29 +383,31 @@ try:
                 cv2.putText(frame, f"ID {tid}", (x1, max(20, y1 - 8)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-                if tid in prev_cx:
-                    px = prev_cx[tid]
-                    already = crossed.get(tid, False)
-                    if not already and px < LINE_X <= cx:
-                        contador -= 1
-                        crossed[tid] = True
-                        _log_event("salida")
-                    elif not already and px > LINE_X >= cx:
-                        contador += 1
-                        crossed[tid] = True
-                        _log_event("entrada")
-                    if abs(cx - LINE_X) > 100:
-                        crossed[tid] = False
-                prev_cx[tid] = cx
+                if cx < LINE_X - DEAD_ZONE:
+                    side_now = "L"
+                elif cx > LINE_X + DEAD_ZONE:
+                    side_now = "R"
+                else:
+                    side_now = None
+                if side_now is not None:
+                    prev_side = sides.get(tid)
+                    if prev_side is not None and prev_side != side_now:
+                        if prev_side == "L":
+                            contador += 1
+                            _log_event("entrada")
+                        else:
+                            _log_event("salida")
+                            if contador > 0:
+                                contador -= 1
+                    sides[tid] = side_now
 
         active_ids = (
             set(results[0].boxes.id.cpu().numpy().astype(int))
             if results[0].boxes.id is not None else set()
         )
-        for tid in list(prev_cx):
+        for tid in list(sides):
             if tid not in active_ids:
-                del prev_cx[tid]
-                crossed.pop(tid, None)
+                del sides[tid]
 
         cv2.line(frame, (LINE_X, 0), (LINE_X, FRAME_H), (0, 0, 255), 2)
         cv2.putText(frame, f"Contador: {contador}", (20, 40),

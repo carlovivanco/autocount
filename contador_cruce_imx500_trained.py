@@ -28,6 +28,7 @@ MODEL = "/home/pi/proyecto/autocount/runs/detect/runs/gym_tec_yolo11n/yolo11n_fi
 
 THRESHOLD        = 0.55
 LINE_X           = 320
+DEAD_ZONE        = 30
 MAX_DISTANCE     = 80
 MAX_MISSES       = 10
 PERSON_CLASS_ID  = 0
@@ -424,13 +425,11 @@ def actualizar_tracks(detections):
                 mejor_dist, mejor_id = d, tid
         if mejor_id is not None:
             tr = tracks[mejor_id]
-            tr["prev_cx"] = tr["cx"]
             tr.update({k: det[k] for k in det})
-            tr["cx"] = det["cx"]
             tr["misses"] = 0
             usados.add(mejor_id)
         else:
-            tracks[next_id] = {**det, "prev_cx": None, "misses": 0, "counted": False}
+            tracks[next_id] = {**det, "side": None, "misses": 0}
             usados.add(next_id)
             next_id += 1
 
@@ -441,20 +440,25 @@ def actualizar_tracks(detections):
                 del tracks[tid]
 
     for tid, tr in tracks.items():
-        if tr["prev_cx"] is None:
-            continue
-        px = tr["prev_cx"]
         cx = tr["cx"]
-        if not tr["counted"] and px < LINE_X <= cx:
-            contador += 1
-            tr["counted"] = True
-            _log_event("entrada")
-        elif not tr["counted"] and px > LINE_X >= cx and contador > 0:
-            contador -= 1
-            tr["counted"] = True
-            _log_event("salida")
-        if abs(cx - LINE_X) > 100:
-            tr["counted"] = False
+        if cx < LINE_X - DEAD_ZONE:
+            side_now = "L"
+        elif cx > LINE_X + DEAD_ZONE:
+            side_now = "R"
+        else:
+            side_now = None
+        if side_now is None:
+            continue
+        prev_side = tr.get("side")
+        if prev_side is not None and prev_side != side_now:
+            if prev_side == "L":
+                contador += 1
+                _log_event("entrada")
+            else:
+                _log_event("salida")
+                if contador > 0:
+                    contador -= 1
+        tr["side"] = side_now
 
 
 def draw_overlay(request, stream="main"):
