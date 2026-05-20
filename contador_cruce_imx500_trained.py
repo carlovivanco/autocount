@@ -28,7 +28,9 @@ MODEL = "/home/pi/proyecto/autocount/runs/detect/runs/gym_tec_yolo11n/yolo11n_fi
 
 THRESHOLD        = 0.55
 LINE_X           = 320
-DEAD_ZONE        = 30
+LINE_GAP         = 50
+LINE_LEFT        = LINE_X - LINE_GAP
+LINE_RIGHT       = LINE_X + LINE_GAP
 MAX_DISTANCE     = 80
 MAX_MISSES       = 10
 PERSON_CLASS_ID  = 0
@@ -429,7 +431,7 @@ def actualizar_tracks(detections):
             tr["misses"] = 0
             usados.add(mejor_id)
         else:
-            tracks[next_id] = {**det, "side": None, "misses": 0}
+            tracks[next_id] = {**det, "last_outer": None, "via_middle": False, "misses": 0}
             usados.add(next_id)
             next_id += 1
 
@@ -441,30 +443,35 @@ def actualizar_tracks(detections):
 
     for tid, tr in tracks.items():
         cx = tr["cx"]
-        if cx < LINE_X - DEAD_ZONE:
-            side_now = "L"
-        elif cx > LINE_X + DEAD_ZONE:
-            side_now = "R"
+        if cx < LINE_LEFT:
+            zone = "L"
+        elif cx > LINE_RIGHT:
+            zone = "R"
         else:
-            side_now = None
-        if side_now is None:
-            continue
-        prev_side = tr.get("side")
-        if prev_side is not None and prev_side != side_now:
-            if prev_side == "L":
-                contador += 1
-                _log_event("entrada")
-            else:
+            zone = "M"
+        if zone == "M":
+            if tr.get("last_outer") is not None:
+                tr["via_middle"] = True
+        elif zone == "L":
+            if tr.get("last_outer") == "R" and tr.get("via_middle"):
                 _log_event("salida")
                 if contador > 0:
                     contador -= 1
-        tr["side"] = side_now
+            tr["last_outer"] = "L"
+            tr["via_middle"] = False
+        else:
+            if tr.get("last_outer") == "L" and tr.get("via_middle"):
+                contador += 1
+                _log_event("entrada")
+            tr["last_outer"] = "R"
+            tr["via_middle"] = False
 
 
 def draw_overlay(request, stream="main"):
     with MappedArray(request, stream) as m:
         h, w = m.array.shape[:2]
-        cv2.line(m.array, (LINE_X, 0), (LINE_X, h), (0, 0, 255), 12)
+        cv2.line(m.array, (LINE_LEFT,  0), (LINE_LEFT,  h), (0, 0, 255), 8)
+        cv2.line(m.array, (LINE_RIGHT, 0), (LINE_RIGHT, h), (0, 0, 255), 8)
         cv2.putText(m.array, f"Contador: {contador}", (20, 40),
                     cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 2)
         for tid, tr in tracks.items():

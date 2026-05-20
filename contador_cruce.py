@@ -22,7 +22,9 @@ from ultralytics import YOLO
 MODEL_PATH       = "yolo26n.pt"
 CONFIDENCE       = 0.4
 LINE_X           = 320
-DEAD_ZONE        = 30
+LINE_GAP         = 50
+LINE_LEFT        = LINE_X - LINE_GAP
+LINE_RIGHT       = LINE_X + LINE_GAP
 FRAME_W, FRAME_H = 640, 480
 
 WS_PORT          = 8765
@@ -59,7 +61,7 @@ def _save_counter_state():
 # Estado global
 # -------------------------------------------------
 contador = _load_counter_state()
-sides: dict[int, str] = {}
+track_state: dict[int, dict] = {}
 _last_date: str = datetime.now().strftime("%Y-%m-%d")
 
 # -------------------------------------------------
@@ -300,7 +302,7 @@ def _record_sample():
 
     if current_date != _last_date:
         contador = 0
-        sides.clear()
+        track_state.clear()
         _hourly_samples.clear()
         _last_date = current_date
         _save_counter_state()
@@ -383,33 +385,40 @@ try:
                 cv2.putText(frame, f"ID {tid}", (x1, max(20, y1 - 8)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-                if cx < LINE_X - DEAD_ZONE:
-                    side_now = "L"
-                elif cx > LINE_X + DEAD_ZONE:
-                    side_now = "R"
+                if cx < LINE_LEFT:
+                    zone = "L"
+                elif cx > LINE_RIGHT:
+                    zone = "R"
                 else:
-                    side_now = None
-                if side_now is not None:
-                    prev_side = sides.get(tid)
-                    if prev_side is not None and prev_side != side_now:
-                        if prev_side == "L":
-                            contador += 1
-                            _log_event("entrada")
-                        else:
-                            _log_event("salida")
-                            if contador > 0:
-                                contador -= 1
-                    sides[tid] = side_now
+                    zone = "M"
+                tr = track_state.setdefault(tid, {"last_outer": None, "via_middle": False})
+                if zone == "M":
+                    if tr["last_outer"] is not None:
+                        tr["via_middle"] = True
+                elif zone == "L":
+                    if tr["last_outer"] == "R" and tr["via_middle"]:
+                        _log_event("salida")
+                        if contador > 0:
+                            contador -= 1
+                    tr["last_outer"] = "L"
+                    tr["via_middle"] = False
+                else:
+                    if tr["last_outer"] == "L" and tr["via_middle"]:
+                        contador += 1
+                        _log_event("entrada")
+                    tr["last_outer"] = "R"
+                    tr["via_middle"] = False
 
         active_ids = (
             set(results[0].boxes.id.cpu().numpy().astype(int))
             if results[0].boxes.id is not None else set()
         )
-        for tid in list(sides):
+        for tid in list(track_state):
             if tid not in active_ids:
-                del sides[tid]
+                del track_state[tid]
 
-        cv2.line(frame, (LINE_X, 0), (LINE_X, FRAME_H), (0, 0, 255), 2)
+        cv2.line(frame, (LINE_LEFT,  0), (LINE_LEFT,  FRAME_H), (0, 0, 255), 2)
+        cv2.line(frame, (LINE_RIGHT, 0), (LINE_RIGHT, FRAME_H), (0, 0, 255), 2)
         cv2.putText(frame, f"Contador: {contador}", (20, 40),
                     cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 2)
         cv2.imshow("Conteo - Gym Tec EdoMex", frame)
