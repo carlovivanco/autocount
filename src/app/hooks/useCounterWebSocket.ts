@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 
 const WS_URL = (import.meta.env.VITE_WS_URL as string | undefined) || 'ws://raspberrypi.local:8765';
 
-export type TodayEvent = { tipo: string; timestamp: string };
+export type TodayEvent = { tipo: string; fuente?: 'auto' | 'manual'; timestamp: string };
 
 export type PeakSchedule = Record<string, number[]>;
 
@@ -31,7 +31,7 @@ function triggerExcelDownload(b64: string, filename: string) {
 }
 
 export function useCounterWebSocket(
-  onDelta: (delta: number) => void,
+  onDelta: (delta: number, lastEvent?: TodayEvent) => void,
 ): CounterWebSocketResult {
   const [count, setCount] = useState(0);
   const [connected, setConnected] = useState(false);
@@ -93,7 +93,10 @@ export function useCounterWebSocket(
               }
             } else {
               const delta = newCount - prevCountRef.current;
-              if (delta !== 0) onDeltaRef.current(delta);
+              if (delta !== 0) {
+                const lastEvent = (data.last_event ?? undefined) as TodayEvent | undefined;
+                onDeltaRef.current(delta, lastEvent);
+              }
             }
 
             isFirstMessage.current = false;
