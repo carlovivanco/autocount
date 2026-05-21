@@ -31,8 +31,8 @@ LINE_X           = 320
 LINE_GAP         = 50
 LINE_LEFT        = LINE_X - LINE_GAP
 LINE_RIGHT       = LINE_X + LINE_GAP
-MAX_DISTANCE     = 150
-MAX_MISSES       = 10
+MAX_DISTANCE     = 120
+MAX_MISSES       = 15
 PERSON_CLASS_ID  = 0
 
 RELAY_URL       = os.getenv("RELAY_URL", "wss://autocount-relay.onrender.com")
