@@ -162,9 +162,15 @@ def _load_today_events() -> list:
         return []
 
 
+_last_event: dict | None = None
+
+
 def _log_event(tipo: str, fuente: str = "auto"):
+    global _last_event
+    event = {"tipo": tipo, "fuente": fuente, "timestamp": datetime.now().isoformat()}
+    _last_event = event
     events = _load_today_events()
-    events.append({"tipo": tipo, "fuente": fuente, "timestamp": datetime.now().isoformat()})
+    events.append(event)
     try:
         with open(_today_events_file(), "w") as f:
             json.dump(events, f)
@@ -185,9 +191,14 @@ def _current_peak_prediction() -> str | None:
 
 
 async def _broadcast(count: int):
+    global _last_event
     if not ws_clients:
         return
-    msg = json.dumps({"count": count, "peak_prediction": _current_peak_prediction()})
+    payload = {"count": count, "peak_prediction": _current_peak_prediction()}
+    if _last_event is not None:
+        payload["last_event"] = _last_event
+        _last_event = None
+    msg = json.dumps(payload)
     await asyncio.gather(
         *[c.send(msg) for c in list(ws_clients)],
         return_exceptions=True,

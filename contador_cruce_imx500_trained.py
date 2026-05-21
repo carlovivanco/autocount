@@ -162,9 +162,15 @@ def _load_today_events() -> list:
         return []
 
 
+_last_event: dict | None = None
+
+
 def _log_event(tipo: str, fuente: str = "auto"):
+    global _last_event
+    event = {"tipo": tipo, "fuente": fuente, "timestamp": datetime.now().isoformat()}
+    _last_event = event
     events = _load_today_events()
-    events.append({"tipo": tipo, "fuente": fuente, "timestamp": datetime.now().isoformat()})
+    events.append(event)
     try:
         with open(_today_events_file(), "w") as f:
             json.dump(events, f)
@@ -202,12 +208,15 @@ def _get_peak_schedule() -> dict | None:
 
 
 async def _broadcast(count: int):
-    global ws_connection
+    global ws_connection, _last_event
     if ws_connection is None:
         return
     try:
-        msg = json.dumps({"count": count, "peak_prediction": _current_peak_prediction()})
-        await ws_connection.send(msg)
+        payload = {"count": count, "peak_prediction": _current_peak_prediction()}
+        if _last_event is not None:
+            payload["last_event"] = _last_event
+            _last_event = None
+        await ws_connection.send(json.dumps(payload))
     except Exception:
         pass
 

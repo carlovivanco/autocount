@@ -78,7 +78,11 @@ function LoginForm({ onLogin }: { onLogin: () => void }) {
   );
 }
 
-type LogEntry = { type: 'entrada' | 'salida'; timestamp: Date };
+type LogEntry = {
+  type: 'entrada' | 'salida';
+  fuente: 'auto' | 'manual';
+  timestamp: Date;
+};
 
 const todayKey = () => `gym_log_${new Date().toISOString().slice(0, 10)}`;
 
@@ -87,13 +91,14 @@ function loadLog(): { entries: LogEntry[]; totalEntries: number; totalExits: num
     const raw = localStorage.getItem(todayKey());
     if (!raw) return { entries: [], totalEntries: 0, totalExits: 0 };
     const data = JSON.parse(raw) as {
-      entries: Array<{ type: string; timestamp: string }>;
+      entries: Array<{ type: string; fuente?: string; timestamp: string }>;
       totalEntries: number;
       totalExits: number;
     };
     return {
       entries: data.entries.map(e => ({
         type: e.type as 'entrada' | 'salida',
+        fuente: (e.fuente === 'manual' ? 'manual' : 'auto') as 'auto' | 'manual',
         timestamp: new Date(e.timestamp),
       })),
       totalEntries: data.totalEntries,
@@ -107,7 +112,11 @@ function loadLog(): { entries: LogEntry[]; totalEntries: number; totalExits: num
 function saveLog(entries: LogEntry[], totalEntries: number, totalExits: number) {
   try {
     localStorage.setItem(todayKey(), JSON.stringify({
-      entries: entries.map(e => ({ type: e.type, timestamp: e.timestamp.toISOString() })),
+      entries: entries.map(e => ({
+        type: e.type,
+        fuente: e.fuente,
+        timestamp: e.timestamp.toISOString(),
+      })),
       totalEntries,
       totalExits,
     }));
@@ -123,11 +132,16 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const [totalEntries, setTotalEntries] = useState(_log.totalEntries);
   const [totalExits, setTotalExits] = useState(_log.totalExits);
 
-  const handleDelta = useCallback((delta: number) => {
+  const handleDelta = useCallback((delta: number, lastEvent?: TodayEvent) => {
     const now = new Date();
+    const fuente: 'auto' | 'manual' = lastEvent?.fuente === 'manual' ? 'manual' : 'auto';
     const added = Array.from(
       { length: Math.abs(delta) },
-      () => ({ type: (delta > 0 ? 'entrada' : 'salida') as 'entrada' | 'salida', timestamp: now }),
+      () => ({
+        type: (delta > 0 ? 'entrada' : 'salida') as 'entrada' | 'salida',
+        fuente,
+        timestamp: now,
+      }),
     );
     _log.entries = [..._log.entries, ...added];
     if (delta > 0) _log.totalEntries += delta;
@@ -145,6 +159,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     if (todayEvents === null) return;
     const loaded: LogEntry[] = todayEvents.map((e: TodayEvent) => ({
       type: e.tipo as 'entrada' | 'salida',
+      fuente: e.fuente === 'manual' ? 'manual' : 'auto',
       timestamp: new Date(e.timestamp),
     }));
     const te = loaded.filter(e => e.type === 'entrada').length;
@@ -351,7 +366,11 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                       </p>
                     </div>
                   </div>
-                  <span className="text-white/30 text-xs">Detección automática</span>
+                  <span className={`text-xs ${
+                    entry.fuente === 'manual' ? 'text-amber-300' : 'text-white/30'
+                  }`}>
+                    {entry.fuente === 'manual' ? 'Ajuste manual' : 'Detección automática'}
+                  </span>
                 </div>
               ))}
           </div>
