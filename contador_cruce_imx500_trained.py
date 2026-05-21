@@ -25,13 +25,13 @@ from sklearn.ensemble import RandomForestClassifier
 #   2. imx500-package packerOut.zip          → network.rpk  (ejecutar en la Pi)
 #   3. Actualiza MODEL con la ruta al .rpk resultante.
 MODEL = "/home/pi/proyecto/autocount/runs/detect/runs/gym_tec_yolo11n/yolo11n_finetuned/weights/best_imx_model/rpk_out/network.rpk"   # <-- ACTUALIZA ESTA RUTA
-
-THRESHOLD        = 0.55
+SHOW = False
+THRESHOLD        = 0.50
 LINE_X           = 320
 LINE_GAP         = 50
 LINE_LEFT        = LINE_X - LINE_GAP
 LINE_RIGHT       = LINE_X + LINE_GAP
-MAX_DISTANCE     = 80
+MAX_DISTANCE     = 150
 MAX_MISSES       = 10
 PERSON_CLASS_ID  = 0
 
@@ -499,7 +499,7 @@ config = picam2.create_preview_configuration(
 )
 imx500.show_network_fw_progress_bar()
 picam2.pre_callback = draw_overlay
-picam2.start(config, show_preview=True)
+picam2.start(config, show_preview=SHOW)
 if intrinsics.preserve_aspect_ratio:
     imx500.set_auto_aspect_ratio()
 
