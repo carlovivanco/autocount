@@ -157,9 +157,9 @@ def _load_today_events() -> list:
         return []
 
 
-def _log_event(tipo: str):
+def _log_event(tipo: str, fuente: str = "auto"):
     events = _load_today_events()
-    events.append({"tipo": tipo, "timestamp": datetime.now().isoformat()})
+    events.append({"tipo": tipo, "fuente": fuente, "timestamp": datetime.now().isoformat()})
     try:
         with open(_today_events_file(), "w") as f:
             json.dump(events, f)
@@ -204,12 +204,12 @@ async def _ws_handler(websocket):
                 cmd = data.get("command", "")
                 if cmd == "increment":
                     contador += 1
-                    _log_event("entrada")
+                    _log_event("entrada", "manual")
                     _save_counter_state()
                     await _broadcast(contador)
                 elif cmd == "decrement":
                     contador -= 1
-                    _log_event("salida")
+                    _log_event("salida", "manual")
                     _save_counter_state()
                     await _broadcast(contador)
                 elif cmd == "download_excel":

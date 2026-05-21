@@ -80,8 +80,13 @@ wss.on('connection', (ws, req) => {
     ws.send(JSON.stringify({ pi_connected: piSocket !== null }));
 
     ws.on('message', (data) => {
+      const str = data.toString();
+      try {
+        const parsed = JSON.parse(str);
+        if (parsed.command) console.log(`[Cmd] ${parsed.command}`);
+      } catch {}
       if (piSocket && piSocket.readyState === WebSocket.OPEN)
-        piSocket.send(data.toString());
+        piSocket.send(str);
     });
 
     ws.on('close', () => {
