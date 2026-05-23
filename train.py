@@ -29,11 +29,11 @@ from ultralytics import YOLO
 # Configuración — ajusta según tu dataset
 # -------------------------------------------------
 BASE_MODEL = "yolo11n.pt"          # modelo preentrenado de partida
-DATA_YAML  = "/home/pi/proyecto/autocount/dataset/data.yaml"   # ruta al archivo de configuración del dataset
+DATA_YAML  = "./dataset/data.yaml"   # ruta al archivo de configuración del dataset
 
 EPOCHS     = 100                  # máximo de epochs (early stopping puede parar antes)
-IMG_SIZE   = 640                   # resolución de entrenamiento
-BATCH      = 16                     # RTX 4050 6 GB — batch 8 aún causa OOM con yolo11n
+IMG_SIZE   = 512                   # resolución de entrenamiento
+BATCH      = 16                     # RTX 4050 6 GB — batch 8 aún causa OOM con yolo11s
 
 FREEZE     = 10                    # menos capas congeladas → cls head puede adaptarse mejor
 LR0        = 0.001                 # LR estándar de fine-tuning; el run anterior con 0.0001 fue demasiado conservador
@@ -64,7 +64,7 @@ if __name__ == "__main__":
     # -------------------------------------------------
     # Fine-tuning
     # -------------------------------------------------
-    '''model = YOLO(BASE_MODEL)
+    model = YOLO(BASE_MODEL)
 
     result = model.train(
         data=DATA_YAML,
@@ -127,8 +127,14 @@ if __name__ == "__main__":
     )
     print(f"mAP50:    {metrics.box.map50:.3f}")
     print(f"mAP50-95: {metrics.box.map:.3f}")
+
     
     print("\nPara usar el modelo afinado en el contador, cambia en contador_cruce.py:")
     print(f'  MODEL_PATH = "{best_pt}"')
     print(f'\nPara exportar a IMX500 (en la Pi):')
-    print(f'  python train.py --export "{best_pt}"')'''
+    print(f'  python train.py --export "{best_pt}"')
+
+# Resultados:
+# 0.945 yolo11n
+# 0.959 yolo11s
+# 0.967 yolo11m
