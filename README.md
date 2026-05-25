@@ -125,6 +125,50 @@ La consola mostrará:
 
 ---
 
+## Alternativa: cámara normal + AI HAT+ (Hailo)
+
+`contador_cruce.py` es la variante para una **cámara normal** (USB/CSI, no la IMX500) que
+corre el modelo **YOLO11s afinado** en el **AI HAT+ (acelerador Hailo)** mediante
+`picamera2.devices.Hailo`. El conteo, el WebSocket local, el Parquet y el modelo ML son los
+mismos que las demás variantes; solo cambia el backend de inferencia.
+
+### 1. Instalar el stack Hailo en la Pi
+```bash
+sudo apt update && sudo apt install hailo-all   # HailoRT + soporte Hailo de picamera2
+hailortcli scan                                  # debe listar el dispositivo del AI HAT+
+```
+
+### 2. Compilar el modelo a .hef (en PC x86, no en la Pi)
+El AI HAT+ corre modelos en formato `.hef` compilado, no archivos `.pt`. Usa el script de
+conversión `best.pt → ONNX → .hef` dentro del Hailo AI Software Suite / Model Zoo:
+```bash
+# 13 TOPS (AI HAT+ / AI Kit):
+HW_ARCH=hailo8l bash scripts/export_to_hailo.sh
+# 26 TOPS:
+HW_ARCH=hailo8  bash scripts/export_to_hailo.sh
+```
+Genera `models/yolo11s_gym.hef`. Cópialo a la Pi en `autocount/models/`. (El runtime HailoRT
+autodetecta el HAT; el `.hef` debe estar compilado para el arch correcto: `hailo8` o `hailo8l`.)
+
+### 3. Correr
+```bash
+# Con pantalla (cajas, líneas y contador en una ventana):
+SHOW=1 HEF_MODEL=models/yolo11s_gym.hef python3 contador_cruce.py
+# Headless (servicio, sin ventana):
+HEF_MODEL=models/yolo11s_gym.hef python3 contador_cruce.py
+```
+
+| Variable | Default | Descripción |
+|---|---|---|
+| `HEF_MODEL` | `models/yolo11s_gym.hef` | Ruta al `.hef` compilado |
+| `SHOW` | `0` | `1` abre la ventana `cv2.imshow` (tecla `q` para salir); `0` = headless |
+
+Para arranque automático puedes reutilizar el servidor systemd pasando este script:
+`bash pi-setup/setup.sh <RELAY_URL> <PI_TOKEN> contador_cruce.py` (esta variante usa un
+servidor WebSocket **local** en `ws://0.0.0.0:8765`, así que los argumentos de relay se ignoran).
+
+---
+
 ## Frontend — Desarrollo local
 
 ```bash
@@ -345,6 +389,8 @@ sudo systemctl restart autocount
 | Script | Descripción |
 |---|---|
 | `contador_cruce_imx500_trained.py` | Backend principal — YOLO11n + IMX500, cliente WebSocket del relay |
+| `contador_cruce.py` | Backend cámara normal + AI HAT+ (Hailo) — YOLO11s, servidor WebSocket local |
+| `scripts/export_to_hailo.sh` | Compila el YOLO11s afinado a `.hef` (best.pt → ONNX → .hef) |
 | `train.py` | Fine-tuning de YOLO11n con fotos del gym |
 | `pi-setup/setup.sh` | Instala y configura el servicio systemd en la Pi |
 | `relay/server.js` | Relay WebSocket desplegado en Render |

@@ -4,6 +4,7 @@ import csv
 import cv2
 import io
 import json
+import math
 import os
 import threading
 import time
@@ -13,19 +14,29 @@ import joblib
 import pandas as pd
 import websockets
 from picamera2 import Picamera2
+from picamera2.devices import Hailo
 from sklearn.ensemble import RandomForestClassifier
-from ultralytics import YOLO
 
 # -------------------------------------------------
 # Configuración
 # -------------------------------------------------
-MODEL_PATH       = "yolo26n.pt"
+# Modelo YOLO11s afinado, compilado a formato Hailo (.hef) y ejecutado en el AI HAT+.
+# El .hef se genera con scripts/export_to_hailo.sh (best.pt -> ONNX -> .hef) en una PC x86.
+MODEL            = os.getenv("HEF_MODEL", "models/yolo11s_gym.hef")
 CONFIDENCE       = 0.4
+PERSON_CLASS_ID  = 0
 LINE_X           = 320
 LINE_GAP         = 50
 LINE_LEFT        = LINE_X - LINE_GAP
 LINE_RIGHT       = LINE_X + LINE_GAP
 FRAME_W, FRAME_H = 640, 480
+
+# Tracker manual (Hailo no trae tracker integrado como ultralytics)
+MAX_DISTANCE     = 120       # px máx. para asociar detección con track existente
+MAX_MISSES       = 15        # frames sin verse antes de descartar un track
+MIN_AREA         = 1500      # área mínima de caja (px²) para descartar ruido
+
+SHOW             = os.getenv("SHOW", "0") == "1"   # ventana cv2.imshow; default headless
 
 WS_PORT          = 8765
 PARQUET_FILE     = "conteo_horario.parquet"
@@ -61,7 +72,8 @@ def _save_counter_state():
 # Estado global
 # -------------------------------------------------
 contador = _load_counter_state()
-track_state: dict[int, dict] = {}
+tracks: dict[int, dict] = {}
+next_id: int = 0
 _last_date: str = datetime.now().strftime("%Y-%m-%d")
 
 # -------------------------------------------------
@@ -304,7 +316,7 @@ def _train_model():
 
 
 def _record_sample():
-    global _last_sample_time, _last_hour, _hourly_samples, contador, _last_date
+    global _last_sample_time, _last_hour, _hourly_samples, contador, _last_date, next_id
 
     now_ts = time.time()
     now_dt = datetime.fromtimestamp(now_ts)
@@ -313,7 +325,8 @@ def _record_sample():
 
     if current_date != _last_date:
         contador = 0
-        track_state.clear()
+        tracks.clear()
+        next_id = 0
         _hourly_samples.clear()
         _last_date = current_date
         _save_counter_state()
@@ -350,20 +363,123 @@ def _record_sample():
 
 
 # -------------------------------------------------
-# Inicio – cámara, modelo, servicios
+# Detección (Hailo / AI HAT+) y tracking manual
 # -------------------------------------------------
-model = YOLO(MODEL_PATH)
+def distancia(x1, y1, x2, y2):
+    return math.hypot(x2 - x1, y2 - y1)
+
+
+def extract_detections(hailo_output, w, h, threshold):
+    """Convierte la salida NMS de Hailo a cajas en coords de display.
+
+    La salida es una lista indexada por clase; cada detección es
+    [y0, x0, y1, x1, score] con coordenadas normalizadas en [0, 1].
+    """
+    dets = []
+    for class_id, detections in enumerate(hailo_output):
+        if class_id != PERSON_CLASS_ID:
+            continue
+        for det in detections:
+            score = float(det[4])
+            if score < threshold:
+                continue
+            y0, x0, y1, x1 = det[:4]
+            bx1, by1 = int(x0 * w), int(y0 * h)
+            bx2, by2 = int(x1 * w), int(y1 * h)
+            if (bx2 - bx1) * (by2 - by1) < MIN_AREA:
+                continue
+            dets.append({
+                "x1": bx1, "y1": by1, "x2": bx2, "y2": by2,
+                "cx": (bx1 + bx2) // 2, "cy": (by1 + by2) // 2, "conf": score,
+            })
+    return dets
+
+
+def actualizar_tracks(dets):
+    global tracks, next_id, contador
+
+    usados = set()
+    ids_tracks = list(tracks.keys())
+    for det in dets:
+        mejor_id, mejor_dist = None, 1e9
+        for tid in ids_tracks:
+            if tid in usados:
+                continue
+            d = distancia(det["cx"], det["cy"], tracks[tid]["cx"], tracks[tid]["cy"])
+            if d < mejor_dist and d < MAX_DISTANCE:
+                mejor_dist, mejor_id = d, tid
+        if mejor_id is not None:
+            tr = tracks[mejor_id]
+            tr.update({k: det[k] for k in det})
+            tr["misses"] = 0
+            usados.add(mejor_id)
+        else:
+            tracks[next_id] = {**det, "last_outer": None, "via_middle": False, "misses": 0}
+            usados.add(next_id)
+            next_id += 1
+
+    for tid in list(tracks.keys()):
+        if tid not in usados:
+            tracks[tid]["misses"] += 1
+            if tracks[tid]["misses"] > MAX_MISSES:
+                del tracks[tid]
+
+    for tid, tr in tracks.items():
+        cx = tr["cx"]
+        if cx < LINE_LEFT:
+            zone = "L"
+        elif cx > LINE_RIGHT:
+            zone = "R"
+        else:
+            zone = "M"
+        if zone == "M":
+            if tr.get("last_outer") is not None:
+                tr["via_middle"] = True
+        elif zone == "L":
+            if tr.get("last_outer") == "R" and tr.get("via_middle"):
+                _log_event("salida")
+                if contador > 0:
+                    contador -= 1
+            tr["last_outer"] = "L"
+            tr["via_middle"] = False
+        else:
+            if tr.get("last_outer") == "L" and tr.get("via_middle"):
+                contador += 1
+                _log_event("entrada")
+            tr["last_outer"] = "R"
+            tr["via_middle"] = False
+
+
+def dibujar(frame):
+    for tid, tr in tracks.items():
+        cv2.rectangle(frame, (tr["x1"], tr["y1"]), (tr["x2"], tr["y2"]), (0, 255, 0), 2)
+        cv2.circle(frame, (tr["cx"], tr["cy"]), 5, (0, 255, 0), -1)
+        cv2.putText(frame, f"ID {tid}", (tr["x1"], max(20, tr["y1"] - 8)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+    cv2.line(frame, (LINE_LEFT,  0), (LINE_LEFT,  FRAME_H), (0, 0, 255), 2)
+    cv2.line(frame, (LINE_RIGHT, 0), (LINE_RIGHT, FRAME_H), (0, 0, 255), 2)
+    cv2.putText(frame, f"Contador: {contador}", (20, 40),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 2)
+
+
+# -------------------------------------------------
+# Inicio – cámara (normal), modelo (AI HAT+), servicios
+# -------------------------------------------------
+hailo = Hailo(MODEL)
+model_h, model_w, _ = hailo.get_input_shape()
 
 picam2 = Picamera2()
 config = picam2.create_preview_configuration(
-    main={"size": (FRAME_W, FRAME_H), "format": "RGB888"}
+    main={"size": (FRAME_W, FRAME_H), "format": "RGB888"},
+    lores={"size": (model_w, model_h), "format": "RGB888"},
 )
 picam2.configure(config)
 picam2.start()
 time.sleep(2)
 
 threading.Thread(target=_start_ws_server, daemon=True).start()
-print("Presiona q para salir")
+print(f"Modelo Hailo {MODEL} ({model_w}x{model_h}) en AI HAT+ — "
+      f"{'ventana activa, presiona q para salir' if SHOW else 'modo headless'}")
 
 # -------------------------------------------------
 # Bucle principal
@@ -372,67 +488,17 @@ prev_contador = contador
 
 try:
     while True:
-        frame = picam2.capture_array()
+        lores = picam2.capture_array("lores")
+        results = hailo.run(lores)
+        dets = extract_detections(results, FRAME_W, FRAME_H, CONFIDENCE)
+        actualizar_tracks(dets)
 
-        results = model.track(
-            frame,
-            classes=[0],
-            persist=True,
-            conf=CONFIDENCE,
-            verbose=False,
-        )
-
-        if results[0].boxes.id is not None:
-            boxes = results[0].boxes.xyxy.cpu().numpy()
-            ids   = results[0].boxes.id.cpu().numpy().astype(int)
-
-            for box, tid in zip(boxes, ids):
-                x1, y1, x2, y2 = map(int, box)
-                cx = (x1 + x2) // 2
-                cy = (y1 + y2) // 2
-
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.circle(frame, (cx, cy), 5, (0, 255, 0), -1)
-                cv2.putText(frame, f"ID {tid}", (x1, max(20, y1 - 8)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-
-                if cx < LINE_LEFT:
-                    zone = "L"
-                elif cx > LINE_RIGHT:
-                    zone = "R"
-                else:
-                    zone = "M"
-                tr = track_state.setdefault(tid, {"last_outer": None, "via_middle": False})
-                if zone == "M":
-                    if tr["last_outer"] is not None:
-                        tr["via_middle"] = True
-                elif zone == "L":
-                    if tr["last_outer"] == "R" and tr["via_middle"]:
-                        _log_event("salida")
-                        if contador > 0:
-                            contador -= 1
-                    tr["last_outer"] = "L"
-                    tr["via_middle"] = False
-                else:
-                    if tr["last_outer"] == "L" and tr["via_middle"]:
-                        contador += 1
-                        _log_event("entrada")
-                    tr["last_outer"] = "R"
-                    tr["via_middle"] = False
-
-        active_ids = (
-            set(results[0].boxes.id.cpu().numpy().astype(int))
-            if results[0].boxes.id is not None else set()
-        )
-        for tid in list(track_state):
-            if tid not in active_ids:
-                del track_state[tid]
-
-        cv2.line(frame, (LINE_LEFT,  0), (LINE_LEFT,  FRAME_H), (0, 0, 255), 2)
-        cv2.line(frame, (LINE_RIGHT, 0), (LINE_RIGHT, FRAME_H), (0, 0, 255), 2)
-        cv2.putText(frame, f"Contador: {contador}", (20, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 2)
-        cv2.imshow("Conteo - Gym Tec EdoMex", frame)
+        if SHOW:
+            frame = picam2.capture_array("main")
+            dibujar(frame)
+            cv2.imshow("Conteo - Gym Tec EdoMex", frame)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
 
         if contador != prev_contador:
             broadcast_count()
@@ -441,12 +507,11 @@ try:
 
         _record_sample()
 
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
-
 except KeyboardInterrupt:
     pass
 
 finally:
-    cv2.destroyAllWindows()
+    if SHOW:
+        cv2.destroyAllWindows()
     picam2.stop()
+    hailo.close()
