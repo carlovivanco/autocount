@@ -4,3 +4,9 @@ websockets
 numpy
 # picamera2 solo se instala en Raspberry Pi (viene preinstalado en Pi OS)
 # picamera2
+#
+# AI HAT+ (Hailo): contador_cruce.py corre la inferencia en el acelerador Hailo.
+# En la Pi instala el stack completo con APT (incluye HailoRT + el soporte Hailo
+# de picamera2, picamera2.devices.Hailo):
+#   sudo apt install hailo-all
+# La compilación del modelo a .hef se hace en PC x86 (ver scripts/export_to_hailo.sh).
