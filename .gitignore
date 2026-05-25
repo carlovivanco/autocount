@@ -20,3 +20,10 @@ contador_state.json
 
 # Pre-trained base models (downloaded by ultralytics automatically)
 yolo*.pt
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Modelos compilados para Hailo (.hef) — se generan/copian localmente en la Pi
+models/*.hef
