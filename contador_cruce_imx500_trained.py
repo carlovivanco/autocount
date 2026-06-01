@@ -26,7 +26,7 @@ from sklearn.ensemble import RandomForestClassifier
 #   3. Actualiza MODEL con la ruta al .rpk resultante.
 MODEL = "/home/pi/proyecto/autocount/runs/detect/runs/gym_tec_yolo11n/yolo11n_finetuned/weights/best_imx_model/rpk_out/network.rpk"   # <-- ACTUALIZA ESTA RUTA
 SHOW = False
-THRESHOLD        = 0.50
+THRESHOLD        = 0.45
 LINE_X           = 320
 LINE_GAP         = 50
 LINE_LEFT        = LINE_X - LINE_GAP
@@ -162,15 +162,9 @@ def _load_today_events() -> list:
         return []
 
 
-_last_event: dict | None = None
-
-
 def _log_event(tipo: str, fuente: str = "auto"):
-    global _last_event
-    event = {"tipo": tipo, "fuente": fuente, "timestamp": datetime.now().isoformat()}
-    _last_event = event
     events = _load_today_events()
-    events.append(event)
+    events.append({"tipo": tipo, "fuente": fuente, "timestamp": datetime.now().isoformat()})
     try:
         with open(_today_events_file(), "w") as f:
             json.dump(events, f)
@@ -208,15 +202,12 @@ def _get_peak_schedule() -> dict | None:
 
 
 async def _broadcast(count: int):
-    global ws_connection, _last_event
+    global ws_connection
     if ws_connection is None:
         return
     try:
-        payload = {"count": count, "peak_prediction": _current_peak_prediction()}
-        if _last_event is not None:
-            payload["last_event"] = _last_event
-            _last_event = None
-        await ws_connection.send(json.dumps(payload))
+        msg = json.dumps({"count": count, "peak_prediction": _current_peak_prediction()})
+        await ws_connection.send(msg)
     except Exception:
         pass
 
