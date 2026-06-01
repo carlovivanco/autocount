@@ -4,13 +4,13 @@ import csv
 import cv2
 import io
 import json
-import math
 import os
 import threading
 import time
 from datetime import datetime, timedelta
 
 import joblib
+import numpy as np
 import pandas as pd
 import websockets
 from picamera2 import Picamera2
@@ -31,9 +31,12 @@ LINE_LEFT        = LINE_X - LINE_GAP
 LINE_RIGHT       = LINE_X + LINE_GAP
 FRAME_W, FRAME_H = 640, 480
 
-# Tracker manual (Hailo no trae tracker integrado como ultralytics)
-MAX_DISTANCE     = 120       # px máx. para asociar detección con track existente
+# Tracker SORT-lite (Kalman cv2 + IoU greedy). Sin deps extra; Hailo no trae tracker
+# integrado como ultralytics.
+IOU_MIN          = 0.3       # IoU mínimo para emparejar detección con track existente
 MAX_MISSES       = 15        # frames sin verse antes de descartar un track
+MIN_HITS         = 3         # frames consecutivos antes de confirmar un track (anti-flicker)
+MIN_VX           = 0.5       # |vx| (px/frame) mínimo para validar la dirección del cruce
 MIN_AREA         = 1500      # área mínima de caja (px²) para descartar ruido
 
 SHOW             = os.getenv("SHOW", "0") == "1"   # ventana cv2.imshow; default headless
@@ -365,8 +368,34 @@ def _record_sample():
 # -------------------------------------------------
 # Detección (Hailo / AI HAT+) y tracking manual
 # -------------------------------------------------
-def distancia(x1, y1, x2, y2):
-    return math.hypot(x2 - x1, y2 - y1)
+def _iou(a, b):
+    x1, y1 = max(a[0], b[0]), max(a[1], b[1])
+    x2, y2 = min(a[2], b[2]), min(a[3], b[3])
+    inter = max(0, x2 - x1) * max(0, y2 - y1)
+    if inter == 0:
+        return 0.0
+    union = (a[2]-a[0])*(a[3]-a[1]) + (b[2]-b[0])*(b[3]-b[1]) - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _new_kalman(cx, cy):
+    """Kalman 2D constante-velocidad: estado [cx, cy, vx, vy], medición [cx, cy]."""
+    kf = cv2.KalmanFilter(4, 2)
+    kf.transitionMatrix = np.array([
+        [1, 0, 1, 0],
+        [0, 1, 0, 1],
+        [0, 0, 1, 0],
+        [0, 0, 0, 1],
+    ], dtype=np.float32)
+    kf.measurementMatrix = np.array([
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+    ], dtype=np.float32)
+    kf.processNoiseCov = np.eye(4, dtype=np.float32) * 1e-2
+    kf.measurementNoiseCov = np.eye(2, dtype=np.float32)
+    kf.errorCovPost = np.eye(4, dtype=np.float32)
+    kf.statePost = np.array([[cx], [cy], [0], [0]], dtype=np.float32)
+    return kf
 
 
 def extract_detections(hailo_output, w, h, threshold):
@@ -396,35 +425,84 @@ def extract_detections(hailo_output, w, h, threshold):
 
 
 def actualizar_tracks(dets):
+    """SORT-lite: predicción Kalman + matching greedy por IoU + 3 zonas con confirmación."""
     global tracks, next_id, contador
 
-    usados = set()
-    ids_tracks = list(tracks.keys())
-    for det in dets:
-        mejor_id, mejor_dist = None, 1e9
-        for tid in ids_tracks:
-            if tid in usados:
-                continue
-            d = distancia(det["cx"], det["cy"], tracks[tid]["cx"], tracks[tid]["cy"])
-            if d < mejor_dist and d < MAX_DISTANCE:
-                mejor_dist, mejor_id = d, tid
-        if mejor_id is not None:
-            tr = tracks[mejor_id]
-            tr.update({k: det[k] for k in det})
-            tr["misses"] = 0
-            usados.add(mejor_id)
-        else:
-            tracks[next_id] = {**det, "last_outer": None, "via_middle": False, "misses": 0}
-            usados.add(next_id)
-            next_id += 1
-
-    for tid in list(tracks.keys()):
-        if tid not in usados:
-            tracks[tid]["misses"] += 1
-            if tracks[tid]["misses"] > MAX_MISSES:
-                del tracks[tid]
-
+    # 1) Predecir todos los tracks (Kalman avanza un paso)
+    predicted_boxes = {}
     for tid, tr in tracks.items():
+        pred = tr["kf"].predict()
+        pcx, pcy = float(pred[0]), float(pred[1])
+        tr["cx"], tr["cy"] = int(pcx), int(pcy)
+        w_, h_ = tr["w"], tr["h"]
+        predicted_boxes[tid] = (int(pcx - w_/2), int(pcy - h_/2),
+                                int(pcx + w_/2), int(pcy + h_/2))
+
+    # 2) Matching greedy: ordenar pares (det, track) por IoU descendente
+    pairs = []
+    for i, det in enumerate(dets):
+        det_box = (det["x1"], det["y1"], det["x2"], det["y2"])
+        for tid, pbox in predicted_boxes.items():
+            v = _iou(det_box, pbox)
+            if v >= IOU_MIN:
+                pairs.append((v, i, tid))
+    pairs.sort(key=lambda p: p[0], reverse=True)
+
+    used_dets, used_tracks, matches = set(), set(), []
+    for v, i, tid in pairs:
+        if i in used_dets or tid in used_tracks:
+            continue
+        used_dets.add(i); used_tracks.add(tid)
+        matches.append((i, tid))
+
+    # 3) Tracks emparejados: corregir Kalman, actualizar bbox, sumar hit
+    for i, tid in matches:
+        det = dets[i]
+        tr = tracks[tid]
+        tr["kf"].correct(np.array([[np.float32(det["cx"])], [np.float32(det["cy"])]]))
+        tr["x1"], tr["y1"], tr["x2"], tr["y2"] = det["x1"], det["y1"], det["x2"], det["y2"]
+        tr["cx"], tr["cy"] = det["cx"], det["cy"]
+        tr["w"], tr["h"] = det["x2"] - det["x1"], det["y2"] - det["y1"]
+        tr["vx"] = float(tr["kf"].statePost[2])
+        tr["misses"] = 0
+        tr["hits"] += 1
+        if tr["hits"] >= MIN_HITS:
+            tr["confirmed"] = True
+
+    # 4) Tracks no emparejados: envejecer y reposicionar bbox sobre la predicción
+    for tid, tr in tracks.items():
+        if tid in used_tracks:
+            continue
+        tr["misses"] += 1
+        tr["x1"] = tr["cx"] - tr["w"] // 2
+        tr["y1"] = tr["cy"] - tr["h"] // 2
+        tr["x2"] = tr["cx"] + tr["w"] // 2
+        tr["y2"] = tr["cy"] + tr["h"] // 2
+        tr["vx"] = float(tr["kf"].statePost[2])
+    for tid in list(tracks.keys()):
+        if tracks[tid]["misses"] > MAX_MISSES:
+            del tracks[tid]
+
+    # 5) Detecciones huérfanas: crear track nuevo
+    for i, det in enumerate(dets):
+        if i in used_dets:
+            continue
+        tracks[next_id] = {
+            "kf": _new_kalman(det["cx"], det["cy"]),
+            "x1": det["x1"], "y1": det["y1"], "x2": det["x2"], "y2": det["y2"],
+            "cx": det["cx"], "cy": det["cy"],
+            "w": det["x2"] - det["x1"], "h": det["y2"] - det["y1"],
+            "hits": 1, "misses": 0,
+            "confirmed": MIN_HITS <= 1,
+            "last_outer": None, "via_middle": False,
+            "vx": 0.0, "conf": det["conf"],
+        }
+        next_id += 1
+
+    # 6) Conteo por 3 zonas — sólo sobre tracks confirmados, validando dirección con vx
+    for tid, tr in tracks.items():
+        if not tr["confirmed"]:
+            continue
         cx = tr["cx"]
         if cx < LINE_LEFT:
             zone = "L"
@@ -436,14 +514,16 @@ def actualizar_tracks(dets):
             if tr.get("last_outer") is not None:
                 tr["via_middle"] = True
         elif zone == "L":
-            if tr.get("last_outer") == "R" and tr.get("via_middle"):
+            if (tr.get("last_outer") == "R" and tr.get("via_middle")
+                    and tr["vx"] < -MIN_VX):
                 _log_event("salida")
                 if contador > 0:
                     contador -= 1
             tr["last_outer"] = "L"
             tr["via_middle"] = False
         else:
-            if tr.get("last_outer") == "L" and tr.get("via_middle"):
+            if (tr.get("last_outer") == "L" and tr.get("via_middle")
+                    and tr["vx"] > MIN_VX):
                 contador += 1
                 _log_event("entrada")
             tr["last_outer"] = "R"
