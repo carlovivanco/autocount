@@ -23,8 +23,24 @@ from sklearn.ensemble import RandomForestClassifier
 # Ruta al modelo .rpk generado por el flujo de entrenamiento:
 #   1. python train.py           → best.pt  +  best_imx_model/packerOut.zip
 #   2. imx500-package packerOut.zip          → network.rpk  (ejecutar en la Pi)
-#   3. Actualiza MODEL con la ruta al .rpk resultante.
-MODEL = "/home/pi/proyecto/autocount/runs/detect/runs/gym_tec_yolo11n/yolo11n_finetuned/weights/best_imx_model/rpk_out/network.rpk"   # <-- ACTUALIZA ESTA RUTA
+#
+# La ruta se resuelve automáticamente respecto a la ubicación de este script,
+# así no depende de dónde se ejecute ni de rutas absolutas fijas. Se puede
+# sobreescribir con la variable de entorno MODEL_PATH.
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_DEFAULT_MODEL = os.path.join(
+    _SCRIPT_DIR,
+    "runs", "detect", "runs", "gym_tec_yolo11n", "yolo11n_finetuned",
+    "weights", "best_imx_model", "rpk_out", "network.rpk",
+)
+MODEL = os.getenv("MODEL_PATH", _DEFAULT_MODEL)
+if not os.path.exists(MODEL):
+    raise SystemExit(
+        f"No se encontró el modelo .rpk en:\n  {MODEL}\n\n"
+        "Genera el modelo con el flujo de entrenamiento (train.py + imx500-package) "
+        "o indica la ruta correcta con la variable de entorno MODEL_PATH, por ejemplo:\n"
+        "  MODEL_PATH=/ruta/a/network.rpk python contador_cruce_imx500_trained.py"
+    )
 SHOW = False
 THRESHOLD        = 0.50
 LINE_X           = 320
