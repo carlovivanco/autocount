@@ -1,6 +1,5 @@
 *.deb
 *.7z
-dataset/
 .claude/
 
 # Training runs — track only the best model for deployment to the Pi
