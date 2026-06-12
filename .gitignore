@@ -3,11 +3,7 @@
 dataset/
 .claude/
 
-# Training runs — track only the best model for deployment to the Pi
-runs/**
-!runs/**/
-!runs/**/best.pt
-
+# Training runs — track only the best model for deployment to the P
 # Generated/local files
 node_modules/
 relay/node_modules/

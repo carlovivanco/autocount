@@ -26,7 +26,7 @@ from sklearn.ensemble import RandomForestClassifier
 #   3. Actualiza MODEL con la ruta al .rpk resultante.
 MODEL = "/home/pi/proyecto/autocount/runs/detect/runs/gym_tec_yolo11n/yolo11n_finetuned/weights/best_imx_model/rpk_out/network.rpk"   # <-- ACTUALIZA ESTA RUTA
 SHOW = False
-THRESHOLD        = 0.45
+THRESHOLD        = 0.50
 LINE_X           = 320
 LINE_GAP         = 50
 LINE_LEFT        = LINE_X - LINE_GAP
