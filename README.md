@@ -169,6 +169,160 @@ servidor WebSocket **local** en `ws://0.0.0.0:8765`, así que los argumentos de 
 
 ---
 
+## Desde cero: IMX500 paso a paso (cámara AI, sin AI HAT)
+
+Guía end-to-end para desplegar `contador_cruce_imx500_trained.py` con el modelo
+**YOLO11n afinado** corriendo **on-sensor** en la cámara IMX500. La inferencia sucede
+dentro de la cámara, la Pi solo lee bounding boxes y aplica la lógica de cruce/conteo.
+
+```
+PC (Linux/Mac)                          Raspberry Pi 4/5 + IMX500
+─────────────────                       ─────────────────────────
+1. Entrenar best.pt        ┐
+2. Cuantizar → packerOut   ├──(scp)──►  3. imx500-package → network.rpk
+                           ┘            4. Apuntar MODEL al .rpk
+                                        5. systemd → corre el contador
+```
+
+### 1. Hardware
+
+- Raspberry Pi 5 (recomendada) o Pi 4 — 4 GB RAM o más.
+- Cámara **Raspberry Pi AI Camera (IMX500)** conectada al puerto CSI.
+- microSD ≥ 32 GB (Clase 10 / A1).
+- Fuente oficial de 5V / 5A (Pi 5) o 5V / 3A (Pi 4).
+- Red con salida a internet (para el relay WS y para `apt`).
+
+### 2. Preparar la Raspberry Pi
+
+```bash
+# Flashear Raspberry Pi OS Bookworm 64-bit con Raspberry Pi Imager.
+# Tras el primer arranque:
+sudo apt update && sudo apt full-upgrade -y
+sudo rpi-update                                  # opcional, firmware más reciente
+sudo apt install -y imx500-all python3-opencv git
+# imx500-all incluye: firmware, modelos de muestra, herramientas (imx500-package)
+# y el soporte de picamera2 para IMX500.
+
+# Verificar que la cámara se detecta
+rpicam-hello -t 5000                             # debes ver preview por 5s
+```
+
+### 3. Clonar el repo e instalar dependencias Python
+
+```bash
+git clone https://github.com/carlovivanco/autocount.git
+cd autocount
+python3 -m venv yolo-env --system-site-packages   # --system-site-packages = expone picamera2
+source yolo-env/bin/activate
+pip install -r requirements.txt
+pip install pyarrow scikit-learn joblib openpyxl  # extras usados por Parquet/ML
+```
+
+### 4. Entrenar el modelo (en PC, no en la Pi)
+
+> Si quieres usar los pesos ya entrenados (`runs/detect/runs/gym_tec_yolo11n/.../best.pt`)
+> salta al paso 5.
+
+```bash
+# En PC con GPU (acelera mucho); ver detalle en "Entrenamiento del modelo YOLO" abajo
+pip install ultralytics
+# Coloca tu dataset/ (estructura YOLOv8 de Roboflow) y corre:
+python train.py
+# Salida: runs/detect/runs/gym_tec_yolo11n/yolo11n_finetuned/weights/best.pt
+```
+
+### 5. Cuantizar y exportar a formato IMX500 (en PC)
+
+La IMX500 sólo corre modelos **INT8 cuantizados**. Ultralytics tiene un exportador
+nativo para IMX500 que hace la cuantización Post-Training (PTQ) automáticamente
+usando tu dataset de validación como conjunto de calibración:
+
+```bash
+cd autocount
+pip install ultralytics onnx onnxruntime onnxslim    # deps del export IMX
+
+yolo export \
+    model=runs/detect/runs/gym_tec_yolo11n/yolo11n_finetuned/weights/best.pt \
+    format=imx \
+    imgsz=320 \
+    data=dataset/data.yaml      # se usa para calibración INT8 (≥ 200 imgs es ideal)
+```
+
+Esto genera la carpeta `runs/detect/runs/gym_tec_yolo11n/yolo11n_finetuned/weights/best_imx_model/` con:
+
+| Archivo | Para qué sirve |
+|---|---|
+| `packerOut.zip` | Entrada para `imx500-package` en la Pi |
+| `labels.txt` | Nombres de clase (`person`) |
+| `best_imx.onnx` | Modelo INT8 intermedio (no se sube a la cámara) |
+
+> **Tip de cuantización**: si después de exportar notas pérdida grande de accuracy
+> (mAP cae mucho), asegúrate de que `data.yaml` apunta a un set de validación
+> representativo de las condiciones reales (luz del gym, ángulos, distancias). La
+> calibración usa esas imágenes para fijar los rangos INT8.
+
+### 6. Copiar el paquete a la Pi y compilar el `.rpk`
+
+```bash
+# En la PC:
+scp -r runs/detect/runs/gym_tec_yolo11n/yolo11n_finetuned/weights/best_imx_model \
+       pi@<IP_DE_LA_PI>:~/autocount/runs/detect/runs/gym_tec_yolo11n/yolo11n_finetuned/weights/
+
+# En la Pi:
+cd ~/autocount/runs/detect/runs/gym_tec_yolo11n/yolo11n_finetuned/weights/best_imx_model
+imx500-package -i packerOut.zip -o rpk_out
+# Salida: rpk_out/network.rpk  (esto es lo que sube la cámara cuando arranca)
+```
+
+### 7. Actualizar la ruta del modelo en el script
+
+Edita `contador_cruce_imx500_trained.py` y pon la ruta absoluta al `.rpk`:
+
+```python
+MODEL = "/home/pi/autocount/runs/detect/runs/gym_tec_yolo11n/yolo11n_finetuned/weights/best_imx_model/rpk_out/network.rpk"
+```
+
+### 8. Prueba manual
+
+```bash
+cd ~/autocount
+source yolo-env/bin/activate
+RELAY_URL=wss://autocount-relay.onrender.com \
+PI_TOKEN=autocount-pi-secret \
+python3 contador_cruce_imx500_trained.py
+```
+
+La primera vez verás la barra de progreso de subida del firmware a la cámara
+(`imx500.show_network_fw_progress_bar()`) — toma ~20s. Después debe imprimir
+`[Relay] Conectado a wss://...` y empezar a procesar.
+
+### 9. Arranque automático con systemd
+
+```bash
+bash pi-setup/setup.sh wss://autocount-relay.onrender.com autocount-pi-secret
+# Por defecto usa contador_cruce_imx500_trained.py
+sudo systemctl status autocount        # debe estar "active (running)"
+sudo journalctl -u autocount -f        # logs en vivo
+```
+
+### 10. Verificar end-to-end
+
+1. Abre el dashboard de Vercel y verifica el indicador "● Raspberry Pi conectada".
+2. Pásate por delante de la cámara cruzando la línea — el contador del dashboard sube.
+3. En la Pi: `sudo journalctl -u autocount -n 50` debe mostrar líneas `[Parquet] ... → N personas` cada hora.
+
+### Si algo falla
+
+| Síntoma | Causa probable | Fix |
+|---|---|---|
+| `rpicam-hello` no muestra nada | cable mal puesto / config no aplicada | revisar cable CSI y `sudo raspi-config` → Interface → Camera |
+| `imx500-package: command not found` | falta el meta-paquete | `sudo apt install imx500-all` |
+| Cuantización tira mAP muy bajo | dataset de calibración pobre | usar `data=dataset/data.yaml` con ≥ 200 imágenes representativas |
+| El servicio reinicia en loop | falta `.rpk` o ruta mal | revisar la constante `MODEL` y que el archivo exista |
+| Sube cuenta sola sin gente | falsos positivos del modelo | reentrenar con más fotos negativas (sin gente) del fondo |
+
+---
+
 ## Frontend — Desarrollo local
 
 ```bash
