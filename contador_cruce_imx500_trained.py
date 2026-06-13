@@ -1,10 +1,17 @@
+import os
+
+# Cuando no se va a mostrar preview, fuerza el backend Qt "offscreen" para
+# evitar "Could not load the Qt platform plugin xcb" en modo headless o cuando
+# faltan librerías de xcb. Si quieres ver la ventana, exporta SHOW=1.
+if os.getenv("SHOW", "0").lower() not in ("1", "true", "yes"):
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 import asyncio
 import base64
 import cv2
 import io
 import json
 import math
-import os
 import threading
 import time
 from datetime import datetime, timedelta
@@ -41,7 +48,7 @@ if not os.path.exists(MODEL):
         "o indica la ruta correcta con la variable de entorno MODEL_PATH, por ejemplo:\n"
         "  MODEL_PATH=/ruta/a/network.rpk python contador_cruce_imx500_trained.py"
     )
-SHOW = False
+SHOW = os.getenv("SHOW", "0").lower() in ("1", "true", "yes")
 THRESHOLD        = 0.50
 LINE_X           = 320
 LINE_GAP         = 50
